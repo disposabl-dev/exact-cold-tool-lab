@@ -6,6 +6,7 @@ scripts=$(cd "$(dirname "$0")" && pwd)
 fixture="$scripts/../fixtures/android-camera"
 app="$HOME/exact-native/apps/apps"
 out="$RUNNER_TEMP/kit-out"
+mkdir -p "$out"
 [[ ${GITHUB_REPOSITORY:-} == disposabl-dev/exact-cold-tool-lab && -d "$app/.exact" ]] || exit 1
 (cd "$GRADLE_USER_HOME" && find caches -type f -print | LC_ALL=C sort > "$RUNNER_TEMP/android-camera-before.txt")
 cp -R "$fixture"/. "$app/"
