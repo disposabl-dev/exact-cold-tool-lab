@@ -1,29 +1,19 @@
-name: Stage public compiler inputs for fresh-clone test
+name: Time public cache transfer
 on:
   push:
-    branches: [promote-compiled]
+    branches: [release-range-test]
+permissions:
+  contents: read
 jobs:
-  publish:
-    runs-on: blacksmith-4vcpu-ubuntu-2604
-    permissions:
-      contents: write
-      actions: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+  transfer:
+    strategy:
+      matrix:
+        runner: [blacksmith-8vcpu-ubuntu-2604, blacksmith-6vcpu-macos-27]
+    runs-on: ${{ matrix.runner }}
     steps:
-      - name: Collect independent production fixture builds
+      - uses: actions/checkout@v7.0.1
+      - name: Verify fresh large release download
         run: |
-          mkdir inputs
-          for row in '45007415411 compiled-android' '45007652207 compiled-ios'; do
-            read -r run artifact <<< "$row"
-            gh run watch "$run" --exit-status --interval 8
-            gh run download "$run" -n "$artifact" -D inputs
-          done
-          gh release download macos-publisher-v1 -p '*.tar.zst' -D inputs
-          cd inputs
-          for archive in *.zst; do
-            sha256sum "$archive" > "$archive.sha256"
-            zstd -tq "$archive"
-          done
-          gh release create compiled-inputs-v1 --target "$GITHUB_SHA" --title 'Compiled fixture inputs' --notes 'Synthetic public Android and iOS builds for cross-repository cache testing.' *
+          cd "$RUNNER_TEMP"
+          echo '{"cargo-android.zst":{"sha256":"56607e509015fd9f009d0135ff3f56d490abab2644669105bd23b8a2c9467de2","size":614235234}}' > manifest.json
+          time python3 "$GITHUB_WORKSPACE/.github/fetch-input.py" "https://github.com/$GITHUB_REPOSITORY/releases/download/compiled-inputs-v2" manifest.json cargo-android.zst cargo-android.zst
