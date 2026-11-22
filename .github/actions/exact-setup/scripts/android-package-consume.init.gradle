@@ -6,7 +6,9 @@ import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 
-gradle.projectsEvaluated {
+gradle.beforeProject { project ->
+  if (project.path != ':app') return
+  project.afterEvaluate {
     def allow = (System.getenv('EXACT_ANDROID_CATALOG_PACKAGES') ?: '').split(',').findAll { it ==~ /[a-z0-9]+(?:-[a-z0-9]+)*/ }.toSet()
     if (!allow || System.getenv('EXACT_ANDROID_CATALOG_DISABLE') == '1') return
     def sdk = new File(System.getenv('EXACT')).canonicalFile
@@ -14,7 +16,7 @@ gradle.projectsEvaluated {
     def release = System.getenv('EXACT_ANDROID_CATALOG_RELEASE')
     def manifest = System.getenv('EXACT_ANDROID_CATALOG_MANIFEST')
     def work = new File(System.getenv('EXACT_ANDROID_CATALOG_WORK'))
-    def app = gradle.rootProject.findProject(':app')
+    def app = project
     if (!app || !release || !manifest || !work.mkdirs() && !work.isDirectory()) return
     def params = gradle.startParameter.projectProperties
     def dirs = (params.extensionDirs ?: '').split(',').findAll { it }.collect { new File(it).canonicalFile }
@@ -89,4 +91,5 @@ gradle.projectsEvaluated {
         error.printStackTrace()
         System.err.println('Exact Android catalog unavailable; using original Kotlin sources (' + error.class.simpleName + ')')
     }
+}
 }
