@@ -3,6 +3,7 @@ set -euo pipefail
 mode=$1
 [[ $mode == seed || $mode == fresh ]]
 cd "$NATIVE_APP_DIR"
+if [[ ${LAB_APERTURE:-0} == 1 ]]; then cp "$GITHUB_WORKSPACE/.github/aperture-public.contract" app.contract; fi
 export EXACT_UPDATE_TRUST=production EXACT_UPDATE_GENESIS=1 EXACT_BUILD_NUMBER=1 EXACT_VERSION=0.1.0
 export EXACT_MOBILE_CHANNEL=base-1 EXACT_BAKE_OUTPUT="$RUNNER_TEMP/camera-bake"
 if [[ $mode == seed ]]; then id=dev.example.publiccameraseed; else id=dev.example.freshcameranotes; fi
