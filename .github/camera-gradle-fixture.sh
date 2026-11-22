@@ -29,7 +29,9 @@ export EXACT_KEY_PASSWORD="$EXACT_KEYSTORE_PASSWORD"
 trap 'rm -f "$EXACT_KEYSTORE"' EXIT
 keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$EXACT_KEYSTORE" -storepass:env EXACT_KEYSTORE_PASSWORD -keypass:env EXACT_KEY_PASSWORD -alias android -keyalg RSA -dname "CN=Synthetic $mode Camera Notes" -validity 2 >/dev/null 2>&1
 start=$(date +%s%N)
-bun exact.mjs android --release --no-install --json > "$RUNNER_TEMP/camera-result.json"
+args=()
+[[ ${LAB_WRITE_LOCKS:-0} != 1 ]] || args+=(--write-locks)
+bun exact.mjs android --release --no-install "${args[@]}" --json > "$RUNNER_TEMP/camera-result.json"
 end=$(date +%s%N)
 apk=$(jq -er .path "$RUNNER_TEMP/camera-result.json")
 "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/apk-certificate.txt"

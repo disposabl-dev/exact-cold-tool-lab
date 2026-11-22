@@ -1,0 +1,22 @@
+// Isolated lab only: partition public Kotlin outputs by declared implementation.
+import groovy.json.JsonSlurper
+def rows = new JsonSlurper().parse(new File(System.getenv('LAB_CATALOG_INDEX')))
+gradle.settingsEvaluated {
+    def p = gradle.startParameter
+    if (p.taskNames == [':app:assembleRelease']) p.taskNames = [':app:assembleRelease'] + rows.findAll { it.namespace }.collect { ':app:labJar_' + it.name.replace('-', '_') }
+}
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app'), compile = app.tasks.named('compileReleaseKotlin')
+    rows.findAll { it.namespace }.each { row ->
+        app.tasks.register('labJar_' + row.name.replace('-', '_'), Jar) {
+            dependsOn compile
+            from(compile.get().destinationDirectory) { include row.namespace.replace('.', '/') + '/**' }
+            archiveFileName = row.name + '.jar'
+            destinationDirectory = app.file(System.getenv('LAB_CATALOG_OUTPUT'))
+            doLast {
+                if (zipTree(archiveFile.get().asFile).matching { include '**/*.class' }.isEmpty()) throw new GradleException('Empty package jar: ' + row.name)
+                println('LAB_PACKAGE_OK ' + row.name + ' ' + archiveFile.get().asFile.length())
+            }
+        }
+    }
+}

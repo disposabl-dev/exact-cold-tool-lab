@@ -1,0 +1,38 @@
+name: Android public first-party catalog
+on:
+  push:
+    branches: [android-all-packages-v1]
+permissions: {contents: read}
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+jobs:
+  catalog:
+    runs-on: blacksmith-16vcpu-ubuntu-2604
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Compile synthetic public catalog
+        run: |
+          mkdir -p "$HOME/.gradle/init.d" "$RUNNER_TEMP/catalog"
+          cp .github/android-all-package-capture.gradle "$HOME/.gradle/init.d/catalog.gradle"
+          python3 .github/android-all-package-prepare.py "$EXACT" "$RUNNER_TEMP/catalog"
+          export LAB_CATALOG_INDEX="$RUNNER_TEMP/catalog/index.json" LAB_CATALOG_OUTPUT="$RUNNER_TEMP/catalog" LAB_WRITE_LOCKS=1
+          set +e
+          bash .github/camera-gradle-fixture.sh seed
+          status=$?
+          set -e
+          echo "LAB_CATALOG_EXIT $status"
+          ls -lh "$RUNNER_TEMP/catalog"
+          test -n "$(find "$RUNNER_TEMP/catalog" -name '*.jar' -print -quit)"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: public-android-catalog
+          path: |
+            ${{ runner.temp }}/catalog/*.jar
+            ${{ runner.temp }}/catalog/index.json
+          if-no-files-found: error
+          retention-days: 1
