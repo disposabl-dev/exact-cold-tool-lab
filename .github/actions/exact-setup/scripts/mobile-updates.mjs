@@ -112,7 +112,7 @@ if (probing) {
 const { privateKey, publicKey } = updateKey(platform);
 secret.fill(0);
 const [{ resolveApp, readBuilds, classifyArtifacts }, { openOrigin, appdropOrigin },
-  { streams, streamCandidates, publishStream, defaultRelease }, { canonicalBytes }] = await Promise.all(
+  { streams, streamCandidates, publishStream, defaultRelease, readBinaryInputFile }, { canonicalBytes }] = await Promise.all(
   ['app', 'origin', 'publisher', 'deploy-signing'].map(name => import(resolve(EXACT, 'scripts', name + '.mjs'))));
 manifest.deploy = { ...manifest.deploy,
   store: { ...manifest.deploy.store, [platform]: 'A' },
@@ -184,7 +184,23 @@ for (const update of candidates) {
   }
   // SDK-generated shell paths differ between the Linux publisher and iOS builder.
   // The signing scope already binds the actual SDK and every tracked native app input.
+  // The macOS builder patches only the final linker invocation. Compare both
+  // files against the two reviewed variants before admitting a Linux publish.
+  const appleBuilder = 'host/apple/build.mjs';
+  let sameAppleBuilder = false;
+  if (platform === 'ios' && EXACT_REF === 'a55c5581c7e1a62cdee1f09367ea2909c74c7292' &&
+      update.build.pendingInputs.includes(`exact/${appleBuilder}`)) {
+    const known = new Set([
+      '0306f15724f34e8fd3bad29fff511ce16ae829c9625bedddc32e3a2fb684ba6a',
+      'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
+    ]);
+    const signed = await readBinaryInputFile(origin, update.row.receipt);
+    const recorded = signed && JSON.parse(signed.bytes).files.filter(file => file.root === 'exact' && file.path === appleBuilder);
+    const local = createHash('sha256').update(readFileSync(resolve(EXACT, appleBuilder))).digest('hex');
+    sameAppleBuilder = recorded?.length === 1 && known.has(recorded[0].sha256) && known.has(local);
+  }
   const changed = update.build.pendingInputs.filter(path =>
+    !(sameAppleBuilder && path === `exact/${appleBuilder}`) &&
     !(app.generated && /^(?:app\/\.exact\/shells|workspace)\/(?:Cargo\.(?:lock|toml)|rust-toolchain\.toml|(?:android|apple|web|linux|windows)\/(?:Cargo\.toml|build\.rs|src\/(?:main|lib)\.rs))$/.test(path)) &&
     !['exact/host/apple/Sources/ExactCore/GeneratedBatch.swift', 'exact/host/apple/Sources/ExactCore'].includes(path));
   if (changed.length) {
