@@ -1,7 +1,7 @@
 name: Compare real iOS host cohorts
 on:
   push:
-    branches: [ios-general-host-link-v1]
+    branches: [ios-paperstack-6cpu-v1]
 permissions: {contents: read}
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
@@ -18,10 +18,7 @@ jobs:
           - name: paperstack
             repo: disposabl-dev/exact-cold-paperstack
             commit: 0871045e29989ccedea3a3227e499053a201e89e
-          - name: trail
-            repo: disposabl-dev/exact-cold-trail-coach
-            commit: b081d589b2e23f1b16281f32a52fc260e55fea92
-    runs-on: blacksmith-12vcpu-macos-27
+    runs-on: blacksmith-6vcpu-macos-27
     steps:
       - uses: actions/checkout@v7.0.1
         with: {persist-credentials: false}
