@@ -1,0 +1,40 @@
+name: Stage verified public camera build inputs
+on:
+  push:
+    branches: [stage-verified-camera-cache]
+permissions: {contents: write, actions: read}
+jobs:
+  stage:
+    runs-on: blacksmith-4vcpu-ubuntu-2604
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: disposabl-dev/exact-cold-tool-lab
+    steps:
+      - name: Verify source runs and native reuse checks
+        run: |
+          set -euo pipefail
+          for pair in 45015210875:aeaa14a92f9b9f7ef89819c7b39ac9fbb96a5d22 45015661577:9cb5d04579846f07256deff2eddba459edaa4fab; do
+            id=${pair%:*}
+            gh run watch "$id" -R "$REPO" --compact --exit-status --interval 12
+            gh run view "$id" -R "$REPO" --json headSha,conclusion | jq -e --arg sha "${pair#*:}" '.headSha==$sha and .conclusion=="success"'
+          done
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: vetted-camera-gradle
+          path: inputs
+          github-token: ${{ github.token }}
+          run-id: '45015210875'
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: public-camera-objects
+          path: inputs
+          github-token: ${{ github.token }}
+          run-id: '45015661577'
+      - name: Stage compiler inputs for independent fresh repository
+        working-directory: inputs
+        run: |
+          set -euo pipefail
+          zstd -T0 -3 camera-kit.tar -o camera-ios.zst
+          sha256sum camera-ios.zst camera-gradle.zst
+          gh release create camera-package-inputs-lab-1 camera-ios.zst camera-gradle.zst --target "$GITHUB_SHA" -R "$REPO" --prerelease --title 'Camera compiler inputs benchmark' --notes 'Public synthetic Exact camera compiler inputs for the independent first-install benchmark.'
