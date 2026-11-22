@@ -1,7 +1,7 @@
-name: Measure fresh install runners
+name: Measure public delivery
 on:
   push:
-    branches: [first-install-runner-probe]
+    branches: [public-delivery-latency-228]
 permissions:
   contents: read
 env:
@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {platform: ios, runner: blacksmith-12vcpu-macos-27}
-          - {platform: android, runner: blacksmith-16vcpu-ubuntu-2604}
+          - {platform: android, variant: baseline, runner: blacksmith-8vcpu-ubuntu-2604}
+          - {platform: android, variant: parallel, runner: blacksmith-8vcpu-ubuntu-2604}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -29,6 +29,15 @@ jobs:
           platform: ${{ matrix.platform }}
           exact-ref: ${{ env.EXACT_REF }}
           bundle-version: '7'
+      - name: Load pinned AppDrop and instrument the publisher
+        env:
+          MODE: ${{ matrix.variant }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/drop"
+          cd "$RUNNER_TEMP/drop"
+          npm pack --silent appdrop@0.8.0
+          tar -xzf appdrop-0.8.0.tgz
+          python3 "$GITHUB_WORKSPACE/.github/profile-publisher.py"
       - name: Build installer
         shell: bash
         working-directory: ${{ env.NATIVE_APP_DIR }}
@@ -44,3 +53,10 @@ jobs:
           bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure '${{ matrix.platform }}'
           export EXACT_VERSION=0.1.0
           bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" '${{ matrix.platform }}'
+          file="$RUNNER_TEMP/android-artifacts/android-production.apk"
+          (time bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$RUNNER_TEMP/drop/package/cli.mjs" "$file" --json > "$RUNNER_TEMP/drop-out") & link=$!
+          time bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" seed android
+          wait "$link"
+          grep '^HTTP ' "$RUNNER_TEMP/drop-out" | sed -E 's,(/api/[^ ]*/)[[:alnum:]_-]+,\1item,g'
+          echo "Verified AppDrop upload returned a public install link"
+          python3 -c 'import json,sys,re; s=open(sys.argv[1]).read(); j=json.loads(s[s.index("{"):]); assert re.fullmatch("https://(www[.])?appdrop[.]app/d/[A-Za-z0-9]+/?",j["url"])' "$RUNNER_TEMP/drop-out"
