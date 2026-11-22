@@ -1,7 +1,7 @@
 name: Verify iOS kit fresh runner consumer
 on:
   push:
-    branches: [ios-verified-consumer]
+    branches: [ios-verified-arms-consumer]
 permissions:
   contents: read
 env:

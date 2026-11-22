@@ -7,7 +7,7 @@ export CONVEX_ORIGIN=wss://consumer-seed.invalid
 app="$HOME/exact-native/apps/apps"
 kitout="$RUNNER_TEMP/ios-verified"
 mkdir -p "$kitout" "$HOME/.cache/exact/publisher/$EXACT_REF"
-gh release download ios-verified-v1 -R disposabl-dev/exact-cold-tool-lab --dir "$kitout"
+gh release download ios-arms-v1 -R disposabl-dev/exact-cold-tool-lab --dir "$kitout"
 (cd "$kitout" && for checksum in *.sha256; do shasum -a 256 -c "$checksum"; done)
 curl -fsSL --retry 3 https://github.com/disposabl-dev/exact-cold-tool-lab/releases/download/compiled-inputs-v2/ios-publisher.tar.zst -o "$RUNNER_TEMP/publisher.zst"
 echo "2bfa76b5d45615b58a97bd0c87d7591e59a4aecec1ccfd93d2aeeea8ed01a7f0  $RUNNER_TEMP/publisher.zst" | shasum -a 256 -c -
