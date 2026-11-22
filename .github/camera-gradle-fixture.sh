@@ -12,6 +12,14 @@ import json,sys
 p='app.json'; x=json.load(open(p)); x['id']=sys.argv[1]; x['app']['id']=sys.argv[1]; x['host']['android']['id']=sys.argv[1]
 open(p,'w').write(json.dumps(x,indent=2)+'\n')
 PY
+if [[ ${LAB_EXTRA_DEVICE:-0} == 1 ]]; then
+  python3 - <<'PYDEVICE'
+import json
+p='package.json'; x=json.load(open(p)); x['dependencies']['@exact/device']='file:.exact/checkout/packages/device'; open(p,'w').write(json.dumps(x,indent=2)+'\n')
+p='app.contract'; s=open(p).read().replace('use ConvexLive from "@exact/convex"','use ConvexLive from "@exact/convex"\nuse getBattery, BatteryManager from "@exact/device"').replace('component Apps\n','component Apps\n  resource battery = getBattery() as shape BatteryManager else empty()\n').replace('text "Live counter" role=', 'text `Battery ${battery.level}`\n              text "Live counter" role=');open(p,'w').write(s)
+PYDEVICE
+  bun install
+fi
 export EXACT_UPDATE_SEED="$(openssl rand -base64 32)"
 bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure android
 unset EXACT_UPDATE_SEED

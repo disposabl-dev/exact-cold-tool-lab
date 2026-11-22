@@ -1,0 +1,19 @@
+// Lab only: capture camera implementation classes compiled from the public fixture.
+gradle.settingsEvaluated {
+    def p = gradle.startParameter
+    if (p.taskNames == [':app:assembleRelease']) p.taskNames = [':app:assembleRelease', ':app:labCameraJar']
+}
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def compiled = app.tasks.named('compileReleaseKotlin')
+    app.tasks.register('labCameraJar', Jar) {
+        dependsOn compiled
+        from(compiled.get().destinationDirectory) { include 'exact/camera/**' }
+        archiveFileName = 'exact-camera.jar'
+        destinationDirectory = app.file(System.getenv('LAB_CAMERA_OUTPUT'))
+        doLast {
+            if (zipTree(archiveFile.get().asFile).matching { include 'exact/camera/CameraModule.class' }.isEmpty())
+                throw new GradleException('Camera module missing from precompiled jar')
+        }
+    }
+}

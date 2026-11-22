@@ -1,0 +1,61 @@
+name: Independent Android package prototype
+on:
+  push:
+    branches: [android-package-jars-v1]
+permissions: {contents: read}
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+jobs:
+  seed:
+    runs-on: blacksmith-16vcpu-ubuntu-2604
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Compile public camera package
+        run: |
+          mkdir -p "$HOME/.gradle/init.d" "$RUNNER_TEMP/camera-kit"
+          cp .github/camera-package-capture.gradle "$HOME/.gradle/init.d/camera-package.gradle"
+          export LAB_CAMERA_OUTPUT="$RUNNER_TEMP/camera-kit"
+          bash .github/camera-gradle-fixture.sh seed
+          jar tf "$LAB_CAMERA_OUTPUT/exact-camera.jar" | tee "$RUNNER_TEMP/camera-classes.txt"
+          wc -l "$RUNNER_TEMP/camera-classes.txt"
+          ls -lh "$LAB_CAMERA_OUTPUT/exact-camera.jar"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: public-camera-jar
+          path: ${{ runner.temp }}/camera-kit/exact-camera.jar
+          retention-days: 1
+  fresh:
+    needs: seed
+    runs-on: blacksmith-16vcpu-ubuntu-2604
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - uses: actions/download-artifact@v8.0.2
+        with: {name: public-camera-jar, path: '${{ runner.temp }}/camera-kit'}
+      - name: Bind camera jar and add a different first-party package
+        run: |
+          export LAB_CAMERA_JAR="$RUNNER_TEMP/camera-kit/exact-camera.jar"
+          python3 - "$EXACT" <<'PY'
+          import pathlib,sys
+          root=pathlib.Path(sys.argv[1]); script=root/'scripts/agent-android.mjs'; s=script.read_text(); old='bound.flatMap((b) => b.dirs)'; new="bound.flatMap((b) => b.extension === 'camera' ? [] : b.dirs)"; assert s.count(old)==1; script.write_text(s.replace(old,new))
+          gradle=root/'host/android/app/build.gradle.kts'; s=gradle.read_text(); s+='\n// Isolated experiment: implementation jar replacing camera Kotlin sources.\ndependencies { implementation(files(System.getenv("LAB_CAMERA_JAR"))) }\n'; gradle.write_text(s)
+          PY
+          export LAB_EXTRA_DEVICE=1
+          bash .github/camera-gradle-fixture.sh fresh
+          apk="$RUNNER_TEMP/fresh-cameranotes.apk"
+          unzip -p "$apk" 'classes*.dex' | strings | grep -F 'Lexact/camera/CameraModule;' >/dev/null
+          unzip -p "$apk" 'classes*.dex' | strings | grep -F 'Lexact/device/DeviceModule;' >/dev/null
+          echo 'Final APK contains camera and device module classes.'
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: independent-package-apk
+          path: ${{ runner.temp }}/fresh-cameranotes.apk
+          retention-days: 1
