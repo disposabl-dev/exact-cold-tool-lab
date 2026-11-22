@@ -1,7 +1,7 @@
 name: Compare real iOS host cohorts
 on:
   push:
-    branches: [ios-general-host-link-v1]
+    branches: [ios-general-hardened-v1]
 permissions: {contents: read}
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
@@ -15,6 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: paperstack
+            repo: disposabl-dev/exact-cold-paperstack
+            commit: 0871045e29989ccedea3a3227e499053a201e89e
           - name: trail
             repo: disposabl-dev/exact-cold-trail-coach
             commit: b081d589b2e23f1b16281f32a52fc260e55fea92
@@ -38,14 +41,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/catalog/paper" "$RUNNER_TEMP/catalog/trail"
           tar -xf "$RUNNER_TEMP/catalog-paper/host-objects.tar" -C "$RUNNER_TEMP/catalog/paper"
           tar -xf "$RUNNER_TEMP/catalog-trail/host-objects.tar" -C "$RUNNER_TEMP/catalog/trail"
+          python3 "$GITHUB_WORKSPACE/.github/make-host-test-catalog.py" "$RUNNER_TEMP/catalog" "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts"
       - name: Selectively link fresh real app archive
         shell: bash
         run: |
           rsync -a --delete --exclude=.exact --exclude=node_modules --exclude=target "$GITHUB_WORKSPACE/sample/apps/apps/" "$NATIVE_APP_DIR/"
           cd "$NATIVE_APP_DIR"
           bun install --frozen-lockfile
-          export EXACT_LINK_KIT_PROOF="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/ios-general-lab.py"
-          export EXACT_HOST_CATALOG="$RUNNER_TEMP/catalog" EXACT_GENERAL_PROOF="$RUNNER_TEMP/general-proof.json"
+          export EXACT_LINK_KIT_PROOF="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/ios-general-link.py"
+          export EXACT_HOST_CATALOG="$RUNNER_TEMP/catalog/union" EXACT_GENERAL_PROOF="$RUNNER_TEMP/general-proof.json"
           export CONVEX_ORIGIN=wss://public-seed.invalid PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= EXACT_VERSION=0.1.0 EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake"
           bun -e 'const p="app.json",a=await Bun.file(p).json(); a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
           bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios 2>&1 | tee "$RUNNER_TEMP/general-build.log"
