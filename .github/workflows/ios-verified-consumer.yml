@@ -1,10 +1,11 @@
 name: Verify iOS kit fresh runner consumer
 on:
   push:
-    branches: [ios-verified-consumer]
+    branches: [ios-verified-fallback]
 permissions:
   contents: read
 env:
+  IOS_VERIFY_FALLBACK: '1'
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
   EXACT_TOOLS_ORIGIN: none
   EXACT_UPDATE_TRUST: production

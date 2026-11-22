@@ -34,6 +34,15 @@ bun -e '
   const c="app.contract", text=await Bun.file(c).text(); await Bun.write(c,text.replace("text \"App\" role=", "text \"Consumer\" role="));
   const t="app.ts", source=await Bun.file(t).text(); await Bun.write(t,source.replace("Hello from ${name}.","Greetings from ${name}."));
 '
+# Exercise the required safe fallback on an added non-WebSocket grant.
+if [[ "${IOS_VERIFY_FALLBACK:-0}" == 1 ]]; then
+  python3 - <<'PY_GRANT'
+p='app.ts'
+s=open(p).read(); before='export const grants = `net.websocket ${origin}`;'
+assert s.count(before)==1
+open(p,'w').write(s.replace(before, 'export const grants = `net.websocket ${origin}\nnet.fetch https://extra.invalid`;'))
+PY_GRANT
+fi
 # Generate the stock app workspace, then unpack vendored dependency sources.
 APP_DIR="$app" bun -e 'const {resolveApp}=await import(`${process.env.EXACT}/scripts/app.mjs`); resolveApp(process.env.APP_DIR).rust();'
 cargo fetch --locked --manifest-path "$app/.exact/shells/Cargo.toml"
@@ -42,5 +51,10 @@ start=$(date +%s)
 bun exact.mjs ios --device --release --unsigned --archive "$RUNNER_TEMP/consumer.ipa" --json 2>&1 | tee "$RUNNER_TEMP/consumer-build.log"
 echo "consumer build wall: $(($(date +%s)-start))s" | tee -a "$GITHUB_STEP_SUMMARY"
 unzip -tq "$RUNNER_TEMP/consumer.ipa"
-grep -F 'link kit: new production executable linked from verified inputs' "$RUNNER_TEMP/consumer-build.log"
+if [[ "${IOS_VERIFY_FALLBACK:-0}" == 1 ]]; then
+  grep -F 'link kit refused; using normal Swift build' "$RUNNER_TEMP/consumer-build.log"
+  if grep -Fq 'link kit: new production executable linked from verified inputs' "$RUNNER_TEMP/consumer-build.log"; then exit 1; fi
+else
+  grep -F 'link kit: new production executable linked from verified inputs' "$RUNNER_TEMP/consumer-build.log"
+fi
 jq -e '.platform=="ios" and .build.trust=="production" and .build.compat.inputs.app=="dev.disposabl.publicconsumer"' "$RUNNER_TEMP/consumer.receipt.json" >/dev/null
