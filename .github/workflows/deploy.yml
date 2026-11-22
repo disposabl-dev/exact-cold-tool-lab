@@ -2,7 +2,7 @@ name: Deploy app
 
 on:
   push:
-    branches: [test-play-install-transfer-228]
+    branches: [test-play-failure-transfer-228]
     paths-ignore: [.github/workflows/publish.yml]
   workflow_dispatch:
     inputs:
@@ -188,7 +188,7 @@ jobs:
         working-directory: ${{ env.NATIVE_APP_DIR }}
         env:
           ANDROID_APK_SIGNING: ${{ matrix.platform == 'android' && env.FIXTURE_SIGNING || '' }}
-          ANDROID_PLAY_UPLOAD_SIGNING: ${{ env.FIXTURE_SIGNING }}
+          ANDROID_PLAY_UPLOAD_SIGNING: '{"password":"fixture-only","keystore":"YWJj"}' 
           ANDROID_PLAY_CONNECTED: 'true'
         run: bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" "${{ matrix.platform }}"
       - name: Publish the install link and seed signed updates
@@ -234,7 +234,9 @@ jobs:
             retried=$(python3 "$scripts/release-apk.py" publish "$RUNNER_TEMP/recovered.apk")
             [[ "$retried" == "$url" ]]
             echo 'Anonymous full APK and replay both verified'
-            find "$RUNNER_TEMP/android-artifacts" -name '*.aab' -size +1M | grep .
+            [[ "${{ steps.native-build.outcome }}" == failure ]]
+            [[ "${{ steps.native-build.outputs.apk_verified }}" == true ]]
+            echo 'Verified signed APK delivery after deliberate AAB signing failure' 
             early="$RUNNER_TEMP/installer-android.json"
             output=$(mktemp); summary=$(mktemp)
             (
