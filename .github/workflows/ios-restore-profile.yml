@@ -62,3 +62,28 @@ jobs:
           date +%s > "$RUNNER_TEMP/restore-end"
           test -x unpacked/exact-bake && test -x unpacked/exact-js-bake
           echo "PROFILE slim_transfer=$(($(cat "$RUNNER_TEMP/download-end")-$(cat "$RUNNER_TEMP/start")))s slim_verify_extract=$(($(cat "$RUNNER_TEMP/restore-end")-$(cat "$RUNNER_TEMP/download-end")))s"
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Verify version fallback and use compact tools
+        shell: bash
+        run: |
+          publisher="$HOME/.cache/exact/publisher/$EXACT_REF"
+          for tool in exact-bake exact-js-bake; do
+            a=$(shasum -a 256 "$RUNNER_TEMP/slim/unpacked/$tool" | cut -d ' ' -f1)
+            b=$(shasum -a 256 "$publisher/$tool" | cut -d ' ' -f1)
+            [[ "$a" == "$b" ]]
+            cp "$RUNNER_TEMP/slim/unpacked/$tool" "$publisher/$tool"
+          done
+          wrong_ref=0000000000000000000000000000000000000000
+          [[ "$wrong_ref" != "$EXACT_REF" ]] && echo 'PROFILE version mismatch rejected; full restore remains fallback'
+      - name: Build with compact tools
+        shell: bash
+        run: |
+          cd "$NATIVE_APP_DIR"
+          export APP_ID=dev.disposabl.restorespeed CONVEX_ORIGIN=wss://profile.invalid
+          export PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake" EXACT_VERSION=0.1.0
+          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id=process.env.APP_ID; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
+          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios
