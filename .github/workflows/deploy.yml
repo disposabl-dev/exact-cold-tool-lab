@@ -156,11 +156,18 @@ jobs:
       - name: Generate disposable per-platform credentials
         shell: bash
         run: |
-          echo "FIXTURE_SEED=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          seed=$(openssl rand -base64 32)
+          echo "::add-mask::$seed"
+          echo "FIXTURE_SEED=$seed" >> "$GITHUB_ENV"
           if [[ "${{ matrix.platform }}" == android ]]; then
             export PW=$(openssl rand -hex 16)
+            echo "::add-mask::$PW"
             keytool -genkeypair -alias android -keystore "$RUNNER_TEMP/test.p12" -storetype pkcs12 -storepass:env PW -keypass:env PW -dname 'CN=Public transfer fixture' -keyalg RSA -validity 365 -keysize 2048
-            echo "FIXTURE_SIGNING=$(jq -nc --arg pw "$PW" --arg ks "$(base64 -w0 "$RUNNER_TEMP/test.p12")" '{password:$pw,keystore:$ks}')" >> "$GITHUB_ENV"
+            ks=$(base64 -w0 "$RUNNER_TEMP/test.p12")
+            echo "::add-mask::$ks"
+            signing=$(jq -nc --arg pw "$PW" --arg ks "$ks" '{password:$pw,keystore:$ks}')
+            echo "::add-mask::$signing"
+            echo "FIXTURE_SIGNING=$signing" >> "$GITHUB_ENV"
           fi
       - name: Configure updates
         if: matrix.platform != 'web'
