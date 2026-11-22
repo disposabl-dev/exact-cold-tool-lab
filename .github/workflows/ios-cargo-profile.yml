@@ -1,7 +1,7 @@
 name: Profile iOS build subprocesses
 on:
   push:
-    branches: [ios-cargo-profile-v7]
+    branches: [ios-cargo-profile-baseline]
 permissions:
   contents: read
 env:
