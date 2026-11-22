@@ -14,12 +14,17 @@ export EXACT_APPLE_INTENT_FILES=0 EXACT_WATCH_SYNC=0 EXACT_WIDGET_GALLERY=0 IPHO
 export EXACT_LIB_DIR="$CARGO_TARGET_DIR/aarch64-apple-ios/balanced" EXACT_LIB=apps_apple
 unset SDKROOT
 args=(build -c release --scratch-path "$scratch" --triple arm64-apple-ios17.0 --sdk "$sdk" -Xcc -isysroot -Xcc "$sdk" -Xlinker -syslibroot -Xlinker "$sdk" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "$sdk")
-# Compile the full SDK capability closure once; only reusable library targets
-# are exported, never the application composition, linked host or SDK PCMs.
-swift "${args[@]}" --target ExactComposition
+# Match Exact's own host preparation, including its ignored generated Swift.
+bun "$EXACT/kernel/build/apple-batch.mjs"
 swift package describe --type json > "$RUNNER_TEMP/ios-host-package.json"
 swift package dump-package > "$RUNNER_TEMP/ios-host-dump.json"
 python3 "$scripts/ios-host-graph.py" --package-dump "$RUNNER_TEMP/ios-host-dump.json" --target ExactComposition --output "$RUNNER_TEMP/ios-host-graph.json"
+python3 "$scripts/ios-host-sources.py" --sdk "$EXACT" --graph "$RUNNER_TEMP/ios-host-graph.json" --output "$RUNNER_TEMP/ios-host-sources-before.json"
+# Compile the full SDK capability closure once; only reusable library targets
+# are exported, never the application composition, linked host or SDK PCMs.
+swift "${args[@]}" --target ExactComposition
+python3 "$scripts/ios-host-sources.py" --sdk "$EXACT" --graph "$RUNNER_TEMP/ios-host-graph.json" --output "$RUNNER_TEMP/ios-host-sources-after.json"
+cmp -s "$RUNNER_TEMP/ios-host-sources-before.json" "$RUNNER_TEMP/ios-host-sources-after.json"
 out="$RUNNER_TEMP/ios-host-catalog"
 [[ ! -e "$out" ]]
 mkdir -p "$out/host-objects"
@@ -46,7 +51,7 @@ for name in sorted(seen-{'ExactComposition'}):
    shutil.copyfile(f,dst/f.name)
  if not list(dst.glob('*.swiftmodule')): raise ValueError('Missing module interface '+name)
 PY_TARGETS
-python3 - "$scripts" "$kit" "$out" "$EXACT_REF" "$RUNNER_TEMP/ios-host-graph.json" <<'PY'
+python3 - "$scripts" "$kit" "$out" "$EXACT_REF" "$RUNNER_TEMP/ios-host-graph.json" "$RUNNER_TEMP/ios-host-sources-after.json" <<'PY'
 import hashlib,importlib.util,json,sys
 from pathlib import Path
 scripts,kit,out,ref=Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),sys.argv[4]
@@ -61,6 +66,6 @@ for p in sorted((out/'host-objects').rglob('*')):
  assert p.is_file() and not p.is_symlink() and p.suffix in ('.o','.swiftmodule','.swiftdoc','.json')
  files[str(p.relative_to(out))]=proof.digest(p)
 graph=json.load(open(sys.argv[5])); assert graph['schema']==1 and graph['roots']==['ExactComposition']
-(out/'manifest.json').write_text(json.dumps({'ref':ref,'toolchain':proof.toolchain(),'target':'arm64-apple-ios17.0','profile':'release-balanced','conditions':{'intent_files':False,'widget_gallery':False,'watch_sync':False,'composition':'updating'},'targets':graph['targets'],'composition_defines':graph['composition_defines'],'files':files},sort_keys=True)+'\n')
+(out/'manifest.json').write_text(json.dumps({'ref':ref,'toolchain':proof.toolchain(),'target':'arm64-apple-ios17.0','profile':'release-balanced','conditions':{'intent_files':False,'widget_gallery':False,'watch_sync':False,'composition':'updating'},'targets':graph['targets'],'source_hashes':json.load(open(sys.argv[6])),'composition_defines':graph['composition_defines'],'files':files},sort_keys=True)+'\n')
 PY
 COPYFILE_DISABLE=1 tar -C "$out" -cf - . | zstd -T0 -3 -o "$RUNNER_TEMP/kit-out/ios-host-catalog.zst"
