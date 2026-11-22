@@ -1,7 +1,7 @@
 name: Measure public delivery
 on:
   push:
-    branches: [public-delivery-latency-228]
+    branches: [public-delivery-staged-228]
 permissions:
   contents: read
 env:
@@ -18,7 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {platform: android, variant: baseline, runner: blacksmith-8vcpu-ubuntu-2604}
           - {platform: android, variant: parallel, runner: blacksmith-8vcpu-ubuntu-2604}
     runs-on: ${{ matrix.runner }}
     steps:
@@ -52,11 +51,22 @@ jobs:
           fi
           bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure '${{ matrix.platform }}'
           export EXACT_VERSION=0.1.0
-          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" '${{ matrix.platform }}'
+          export DELIVERY_GATE=$(mktemp -d "$RUNNER_TEMP/stage.XXXXXX")
+          cli="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts"
+          stamp() { date +%s%3N; }
+          bash "$cli/native-build.sh" android & builder=$!
+          trap 'if [[ -n "${seed:-}" ]]; then kill "$seed" 2>/dev/null || true; fi' EXIT
+          while [[ ! -f "$DELIVERY_GATE/baked" ]]; do kill -0 "$builder"; sleep .1; done
+          echo "ALL_BAKES_READY $(stamp)"
+          bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$cli/mobile-updates.mjs" seed android & seed=$!
+          wait "$builder"
+          echo "SIGNED_INSTALLER_VERIFIED $(stamp)"
           file="$RUNNER_TEMP/android-artifacts/android-production.apk"
-          (time bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$RUNNER_TEMP/drop/package/cli.mjs" "$file" --json > "$RUNNER_TEMP/drop-out") & link=$!
-          time bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" seed android
-          wait "$link"
-          grep '^HTTP ' "$RUNNER_TEMP/drop-out" | sed -E 's,(/api/[^ ]*/)[[:alnum:]_-]+,\1item,g'
-          echo "Verified AppDrop upload returned a public install link"
-          python3 -c 'import json,sys,re; s=open(sys.argv[1]).read(); j=json.loads(s[s.index("{"):]); assert re.fullmatch("https://(www[.])?appdrop[.]app/d/[A-Za-z0-9]+/?",j["url"])' "$RUNNER_TEMP/drop-out"
+          bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$RUNNER_TEMP/drop/package/cli.mjs" "$file" --json > "$RUNNER_TEMP/drop-out"
+          python3 -c 'import json,sys,re; s=open(sys.argv[1]).read(); j=json.loads(s[s.index("{"):]); assert re.fullmatch("https://(www[.])?appdrop[.]app/d/[A-Za-z0-9]+/?",j["url"]); assert j["size"]==int(sys.argv[2]);print("APK_BYTES",j["size"])' "$RUNNER_TEMP/drop-out" "$(stat -c%s "$file")"
+          echo "APPDROP_UPLOAD_ACCEPTED $(stamp)"
+          touch "$DELIVERY_GATE/installer-verified"
+          wait "$seed"
+          trap - EXIT
+          echo "LINK_AND_OTA_READY $(stamp)"
+          grep '^HTTP ' "$RUNNER_TEMP/drop-out"
