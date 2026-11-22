@@ -20,6 +20,13 @@ jobs:
           mkdir -p "$HOME/.gradle/init.d" "$RUNNER_TEMP/catalog"
           cp .github/android-package-catalog.gradle "$HOME/.gradle/init.d/catalog.gradle"
           export LAB_CATALOG_OUTPUT="$RUNNER_TEMP/catalog"
+          python3 - "$EXACT" <<'PYCODE'
+          import pathlib,sys
+          root=pathlib.Path(sys.argv[1]); p=root/'host/android/app/build.gradle.kts'
+          names=['device','motion','geolocation','nfc','speech-synthesis','local-auth','photos','search-index']
+          paths=','.join('"'+str(root/'packages'/n/'android')+'"' for n in names)
+          p.write_text(p.read_text()+'\nandroid.sourceSets["main"].kotlin.srcDirs('+paths+')\n')
+          PYCODE
           set +e
           bash .github/camera-gradle-fixture.sh seed
           status=$?
