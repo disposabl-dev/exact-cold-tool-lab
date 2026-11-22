@@ -34,23 +34,38 @@ for p in metadata['packages']:
         continue
     packages.append((p['name'], directory))
 plans = {}
+watch_scopes = set()
 for f in target.glob('**/.fingerprint/*/run-build-script-*.json'):
     try:
         info = json.loads(f.read_text())
     except (ValueError, OSError) as e:
         raise SystemExit(f'bad Cargo fingerprint {f}: {e}')
+    candidates = [(name, path) for name, path in packages if f.parent.name.startswith(name + '-')]
+    if candidates:
+        longest = max(len(name) for name, _ in candidates)
+        candidates = [(name, path) for name, path in candidates if len(name) == longest]
     for local in info.get('local', []):
+        if isinstance(local, dict) and isinstance(local.get('RerunIfChanged'), dict):
+            if len(candidates) > 1:
+                raise SystemExit(f'ambiguous SDK fingerprint {f.parent.name}')
+            if len(candidates) == 1:
+                package = candidates[0][1]
+                for item in local['RerunIfChanged'].get('paths', []):
+                    path = Path(item)
+                    path = path if path.is_absolute() else package / path
+                    # Paths outside the pinned SDK retain their own source-time handling.
+                    if path.exists() and path.resolve().is_relative_to(sdk):
+                        if path.is_symlink():
+                            raise SystemExit(f'unsafe watched SDK symlink: {path}')
+                        watch_scopes.add(path.resolve())
         value = local.get('Precalculated') if isinstance(local, dict) else None
         if not isinstance(value, str):
             continue
         match = re.fullmatch(r'(\d+)\.(\d{1,9})s \((.+)\)', value)
         if not match:
             continue # registry packages identify by version, not a file timestamp
-        candidates = [(name, path) for name, path in packages if f.parent.name.startswith(name + '-')]
         if not candidates:
             continue # not an SDK package, e.g. the generated app
-        longest = max(len(name) for name, _ in candidates)
-        candidates = [(name, path) for name, path in candidates if len(name) == longest]
         if len(candidates) != 1:
             raise SystemExit(f'ambiguous SDK fingerprint {f.parent.name}')
         name, package = candidates[0]
@@ -64,14 +79,18 @@ for f in target.glob('**/.fingerprint/*/run-build-script-*.json'):
         old = plans.setdefault(package, (name, item, ns))
         if old[1:] != (item, ns):
             raise SystemExit(f'conflicting Cargo fingerprints for {name}')
-if not plans:
-    print('No SDK package-wide Cargo fingerprints found')
+if not plans and not watch_scopes:
+    print('No SDK package-wide or directory Cargo fingerprints found')
     raise SystemExit(0)
 # A package's chosen max cannot be tied with or outranked by a nested package.
 for package, (name, item, ns) in plans.items():
     for other, (_, other_item, other_ns) in plans.items():
         if other != package and other_item.is_relative_to(package) and other_ns >= ns:
             raise SystemExit(f'overlapping Cargo fingerprints for {name}')
+
+# A watched file is a singleton; a watched directory includes all its files.
+def in_scope(path):
+    return any(path.is_relative_to(package) for package in plans) or any(path == watched or (watched.is_dir() and path.is_relative_to(watched)) for watched in watch_scopes)
 
 # Validate all tracked SDK files in affected packages before changing any time.
 # Git's object ID verifies pinned bytes, and recorded compiler SHA-256 permits
@@ -87,7 +106,7 @@ for row in raw.split(b'\0'):
         continue
     rel = os.fsdecode(raw_path)
     path = sdk / rel
-    if not any(path.is_relative_to(package) for package in plans):
+    if not in_scope(path):
         continue
     if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(sdk):
         raise SystemExit(f'unsafe or missing tracked SDK file {rel}')
@@ -99,7 +118,7 @@ for row in raw.split(b'\0'):
 # Recorded ignored/generated SDK files may participate in a package's scan.
 for rel, expected in recorded.items():
     path = sdk / rel
-    if not any(path.is_relative_to(package) for package in plans) or path in files:
+    if not in_scope(path) or path in files:
         continue
     if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(sdk) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
         raise SystemExit(f'generated SDK input differs from seed: {rel}')
@@ -107,7 +126,7 @@ for rel, expected in recorded.items():
 # Check every file Cargo could see, including ignored files: a package's
 # explicit include list can admit files ignored by Git. Unknown inputs refuse
 # the optimization before any timestamp is changed.
-for package in plans:
+for package in set(plans) | {p for p in watch_scopes if p.is_dir()}:
     for base, directories, names in os.walk(package, followlinks=False):
         directories[:] = [d for d in directories if d not in ('.git', 'target')]
         for name in directories:
@@ -123,13 +142,13 @@ for raw_path in untracked.split(b'\0'):
     if not raw_path:
         continue
     path = sdk / os.fsdecode(raw_path)
-    if any(path.is_relative_to(package) for package in plans) and path not in files:
+    if in_scope(path) and path not in files:
         raise SystemExit(f'unverified untracked SDK source: {path}')
 for _, item, _ in plans.values():
     if item not in files:
         raise SystemExit(f'Cargo fingerprint input is not verified: {item}')
 # Make all competing verified package files older than every selected max.
-floor = min(ns for _, _, ns in plans.values()) - 1_000_000_000
+floor = min([int(e['mtimeNs']) for e in seed['files'] if e.get('root') == 'sdk'] + [ns for _, _, ns in plans.values()]) - 1_000_000_000
 if floor <= 0:
     raise SystemExit('invalid Cargo fingerprint timestamp')
 for path in files:
@@ -140,7 +159,7 @@ for path in files:
 directories = set()
 for path in files:
     directory = path.parent
-    while directory != sdk and any(directory.is_relative_to(package) for package in plans):
+    while directory != sdk and (any(directory.is_relative_to(package) for package in plans) or any(w.is_dir() and directory.is_relative_to(w) for w in watch_scopes)):
         directories.add(directory)
         directory = directory.parent
 for directory in directories:
@@ -149,4 +168,4 @@ for directory in directories:
 for _, item, ns in plans.values():
     st = item.stat()
     os.utime(item, ns=(st.st_atime_ns, ns))
-print(f'Normalized {len(files)} SHA-verified SDK files for {len(plans)} Cargo package fingerprints')
+print(f'Normalized {len(files)} SHA-verified SDK files for {len(plans)} package fingerprints and {len(watch_scopes)} watched paths')
