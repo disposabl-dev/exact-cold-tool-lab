@@ -13,7 +13,7 @@ gradle.projectsEvaluated {
     def kotlin = base.get().class.classLoader.loadClass('org.jetbrains.kotlin.gradle.tasks.KotlinCompile')
     names.each { name ->
         def stem = name.replace('-', '_')
-        def compile = app.tasks.register('labCompile_' + stem, kotlin) {
+        def compile = app.tasks.register('labCompile_' + stem, kotlin, base.get().compilerOptions) {
             dependsOn base
             source(app.fileTree(System.getenv('EXACT') + '/packages/' + name + '/android') { include '**/*.kt' })
             libraries.from(base.get().libraries)
