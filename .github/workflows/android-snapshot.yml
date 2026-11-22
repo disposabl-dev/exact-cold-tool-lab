@@ -36,7 +36,8 @@ jobs:
           curl -fsSL --retry 3 -o index.json "$release/index.json"
           echo '16eb8f2b003aee8ad9dd140ad8c0bf8059ad4b1f192fa374b59bd32f531ca703  index.json' | sha256sum -c -
           python3 "$GITHUB_WORKSPACE/.github/chunked-snapshot.py" fetch android.squashfs index.json --url "$release/android.squashfs"
-          bash "$GITHUB_WORKSPACE/.github/android-snapshot.sh" mount
+          cd "$GITHUB_WORKSPACE"
+          bash .github/android-snapshot.sh mount
           cp -R "$HOME/work/_temp/exact-sdk/host/android" "$RUNNER_TEMP/gradle-prime"
           metadata="$GITHUB_WORKSPACE/apps/apps/gradle-verification.xml"
           if [[ -f "$metadata" ]]; then cp "$metadata" "$RUNNER_TEMP/gradle-prime/gradle/verification-metadata.xml"; fi
