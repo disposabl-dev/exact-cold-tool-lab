@@ -2,6 +2,7 @@
 // sizes and the safe area are left unsaid, so each platform supplies its own:
 // the header is the navigation bar, its heading the title, its button a bar item.
 use ConvexLive from "@exact/convex"
+use takePhotoWithCameraApp, Photo from "@exact/camera"
 
 shape Greeting
   text: string
@@ -20,6 +21,8 @@ component Apps
   resource live = live() as shape ConvexLive else empty(status="connecting")
   resource counter = counter(live.rev) as shape Counter else empty(count=-1)
   mutation incremented as shape IncrementReply
+  mutation photo as shape Photo
+  derive photoError = match failure(photo) { case some(f) => f.code, case none => "" }
   state liked = false
   state waited = 0
   state wait = 1
@@ -27,6 +30,8 @@ component Apps
     every(1000, retry)
   task recovered when live.status == "ready" and wait > 1
     after(1000, resetWait)
+  action takePicture
+    send photo = takePhotoWithCameraApp()
   action like
     liked = not liked
   action increment
@@ -50,11 +55,26 @@ component Apps
       for e in stack(nav) key=e.id
         column navigationKey=`${e.id}` navigationScroll="content" position="absolute" inset=0 display="flex" flex-direction="column"
           header display="flex" align-items="center"
-            text "App" role="heading" aria-level=1 flex=1
+            text "Camera Notes" role="heading" aria-level=1 flex=1
             button press=like aria-label=(liked ? "Unlike" : "Like") testId="like"
               image (liked ? "symbol:heart-fill" : "symbol:heart")
           scroll id="content" flex=1 min-height=0 padding=16
             column gap=12 align-items="flex-start"
+              text "Capture a moment" role="heading" aria-level=2 font="-exact-title2"
+              text "Take a photo and preview it here."
+              button press=takePicture disabled=pending(photo) buttonStyle="filled" testId="take-photo"
+                text (pending(photo) ? "Opening camera…" : "Take photo")
+              match photo
+                case some(p)
+                  image p.path width=280 height=280 object-fit="contain" alt="Your captured photo" testId="photo-preview"
+                case none
+                  text "Your photo will appear here." testId="photo-placeholder"
+              if photoError == "AbortError"
+                text "No photo was taken. You can try again." testId="photo-cancelled"
+              if photoError == "NotAllowedError"
+                text "Camera access is off. Allow it in your device or browser settings, then try again." testId="photo-denied"
+              if photoError != "" and photoError != "AbortError" and photoError != "NotAllowedError"
+                text "Could not open the camera. Please try again." testId="photo-error"
               text greeting.text testId="greeting"
               text "Live counter" role="heading" aria-level=2 font="-exact-title2"
               text (live.status == "closed" ? "Disconnected. Reconnecting…" : live.status == "failed" or failed(counter) ? "Could not load the counter" : live.status == "ready" and counter.count >= 0 ? "Connected to Convex" : "Connecting to Convex…") testId="convex-status"

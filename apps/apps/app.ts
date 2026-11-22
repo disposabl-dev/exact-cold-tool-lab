@@ -4,7 +4,7 @@ import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { convexToJson, jsonToConvex } from 'convex/values';
 
 const origin = import.meta.env.CONVEX_ORIGIN;
-export const grants = `net.websocket ${origin}`;
+export const grants = [`net.websocket ${origin}`, 'device.camera cameraPurpose', 'fs.read app:/tmp', 'fs.write app:/tmp'].join('\n');
 
 const client = convex(origin, { getFunctionName, convexToJson, jsonToConvex });
 const getCounter = makeFunctionReference<'query', Record<string, never>, Result<'counter'>>('counter:get');
