@@ -1,0 +1,44 @@
+name: Measure persistence of local tool images across Blacksmith runners
+on: {push: {branches: [linux-image-sharing-check]}}
+permissions: {contents: read}
+jobs:
+  seed:
+    runs-on: blacksmith-4vcpu-ubuntu-2604
+    outputs:
+      image: ${{ steps.seed.outputs.image }}
+      digest: ${{ steps.seed.outputs.digest }}
+    steps:
+      - id: seed
+        run: |
+          mkdir "$RUNNER_TEMP/image"
+          cd "$RUNNER_TEMP/image"
+          printf '%s\n' "$GITHUB_SHA" > probe
+          printf 'FROM busybox:1.37-musl\nCOPY probe /probe\n' > Dockerfile
+          docker build -t "exact-local-probe:$GITHUB_SHA" .
+          echo "image=$(docker image inspect "exact-local-probe:$GITHUB_SHA" --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+          docker run -d --name public-registry -p 127.0.0.1:5108:5000 registry:2
+          for n in {1..20}; do curl -fsS http://127.0.0.1:5108/v2/ && break || sleep 1; done
+          ref="127.0.0.1:5108/exact-tool-image:$GITHUB_SHA"
+          docker tag "exact-local-probe:$GITHUB_SHA" "$ref"
+          docker push "$ref"
+          digest=$(docker image inspect "$ref" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep '127.0.0.1:5108/exact-tool-image@' | head -1)
+          docker pull "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+  check:
+    needs: seed
+    runs-on: blacksmith-4vcpu-ubuntu-2604
+    env:
+      EXPECTED: ${{ needs.seed.outputs.image }}
+      DIGEST: ${{ needs.seed.outputs.digest }}
+    steps:
+      - name: Measure cached image availability without a registry
+        run: |
+          docker version --format '{{.Server.Version}}'
+          for ref in "$EXPECTED" "$DIGEST"; do
+            if docker image inspect "$ref" > /dev/null 2>&1; then
+              test "$(docker run --rm --pull=never --network=none --read-only "$ref" cat /probe)" = "$GITHUB_SHA"
+              echo "Verified cached public marker via $ref"
+            else
+              echo "Image not found on second runner via $ref"
+            fi
+          done
