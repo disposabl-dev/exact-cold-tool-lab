@@ -1,0 +1,30 @@
+name: Build macOS update publisher
+on:
+  push:
+    branches: [tools-publisher]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: blacksmith-6vcpu-macos-27
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/exact-setup
+        with:
+          platform: ios
+          exact-ref: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+          bundle-version: '3'
+      - name: Compile publisher
+        run: |
+          cd "$EXACT"
+          export CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_TARGET_DIR="$RUNNER_TEMP/publisher"
+          cargo build --locked --release -p exact-bake -p exact-js-bake
+          cd "$CARGO_TARGET_DIR/release"
+          tar -cf - exact-bake exact-js-bake | zstd -T0 -3 -o "$RUNNER_TEMP/ios-publisher.tar.zst"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ios-publisher
+          path: ${{ runner.temp }}/ios-publisher.tar.zst
+          compression-level: 0
