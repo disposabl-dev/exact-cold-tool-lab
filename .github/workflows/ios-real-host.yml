@@ -1,7 +1,7 @@
-name: Compare real iOS host cohorts
+name: Capture media iOS SDK host cohorts
 on:
   push:
-    branches: [ios-real-host-cohorts-v1]
+    branches: [ios-media-host-cohorts-v1]
 permissions: {contents: read}
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
@@ -15,13 +15,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: paperstack
-            repo: disposabl-dev/exact-cold-paperstack
-            commit: 0871045e29989ccedea3a3227e499053a201e89e
-          - name: trail
-            repo: disposabl-dev/exact-cold-trail-coach
-            commit: b081d589b2e23f1b16281f32a52fc260e55fea92
-    runs-on: blacksmith-12vcpu-macos-27
+          - name: aperture
+            repo: disposabl-dev/exact-cold-aperture-log
+            commit: aa4a88aeb7e6c25519a8a2f065456d636df157b6
+          - name: voice
+            repo: disposabl-dev/exact-cold-voice-notes
+            commit: d18136998c5cc7ae74f56e98f8a64129a4573169
+    runs-on: blacksmith-6vcpu-macos-27
     steps:
       - uses: actions/checkout@v7.0.1
         with: {persist-credentials: false}
@@ -35,9 +35,10 @@ jobs:
           rsync -a --delete --exclude=.exact --exclude=node_modules --exclude=target "$GITHUB_WORKSPACE/sample/apps/apps/" "$NATIVE_APP_DIR/"
           cd "$NATIVE_APP_DIR"
           bun install --frozen-lockfile
+          bun -e 'const p="app.ts",s=await Bun.file(p).text(); await Bun.write(p,s.replace(/export const appId = [^;]+;/, "export const appId = \"dev.disposabl.synthetic\";"))'
           unset EXACT_LINK_KIT_PROOF EXACT_LINK_KIT
           export CONVEX_ORIGIN=wss://public-seed.invalid PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= EXACT_VERSION=0.1.0 EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake"
-          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
+          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id="dev.disposabl.synthetic"; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
           bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios
           python3 - <<'PY_ASSERT'
           import json,os
@@ -59,7 +60,19 @@ jobs:
             case "$name" in ExactComposition.swiftmodule|ExactIOS.swiftmodule|ExactLaunchParts.swiftmodule) continue;; esac
             cp -R "$dir" "$RUNNER_TEMP/host-objects/$name"
           done
-          shasum -a 256 "$RUNNER_TEMP"/host-objects/*.o
+          export COHORT_NAME="${{ matrix.name }}" SAMPLE_COMMIT="${{ matrix.commit }}"
+          python3 - <<'PY_MANIFEST'
+          import hashlib,json,os,platform,subprocess
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP']); folder=root/'host-objects'
+          receipt=json.loads((root/'ios-artifacts/apps.receipt.json').read_text())['build']
+          files={str(p.relative_to(folder)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.rglob('*')) if p.is_file() and not p.is_symlink()}
+          assert files and not any(x.startswith(('ExactComposition.', 'ExactLaunchParts.', 'ExactIOS.')) for x in files)
+          manifest={'schema':1,'cohort':os.environ['COHORT_NAME'],'sample_commit':os.environ['SAMPLE_COMMIT'],'exact_ref':os.environ['EXACT_REF'],'target':'arm64-apple-ios','minimum_ios':'17.0','profile':'balanced','sdk':subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-version'],text=True).strip(),'xcode':subprocess.check_output(['xcodebuild','-version'],text=True).strip(),'swift':subprocess.check_output(['swift','--version'],text=True).strip(),'linked':receipt['compat']['inputs']['linked'],'extensions':receipt['graph']['extensions'],'files':files}
+          (folder/'manifest.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
+          print('COHORT_MANIFEST',json.dumps({k:v for k,v in manifest.items() if k!='files'},sort_keys=True))
+          print('MANIFEST_SHA256',hashlib.sha256((folder/'manifest.json').read_bytes()).hexdigest(),'FILES',len(files))
+          PY_MANIFEST
           tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/host-objects.tar" host-objects
       - uses: actions/upload-artifact@v7.0.2
         with: {name: 'ios-host-${{ matrix.name }}', path: '${{ runner.temp }}/host-objects.tar', retention-days: 1, compression-level: 0}
