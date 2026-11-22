@@ -1,7 +1,7 @@
-name: Measure Android incremental release link
+name: Produce Apple compiler and link inputs
 on:
   push:
-    branches: [android-link-units]
+    branches: [ios-unit-kit]
 permissions:
   contents: read
 env:
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [android]
+        platform: [ios]
     runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-6vcpu-macos-27' || 'blacksmith-8vcpu-ubuntu-2604' }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -30,15 +30,12 @@ jobs:
           platform: ${{ matrix.platform }}
           exact-ref: ${{ env.EXACT_REF }}
           bundle-version: ${{ matrix.platform == 'ios' && '3' || '4' }}
-      - name: Build a public production fixture, then change its identity and backend
-        shell: bash
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: bash .github/link-compare.sh
+      - name: Build a public stock iOS application
+        run: bash .github/ios-kit-fixture.sh
       - uses: actions/upload-artifact@v7.0.2
-        if: success() && matrix.platform == 'android'
+        if: always()
         with:
-          name: compiled-android-v2
+          name: ios-compiled
           compression-level: 0
-          path: ${{ runner.temp }}/cargo-*.zst
+          path: ${{ runner.temp }}/kit-out/*
           retention-days: 1
