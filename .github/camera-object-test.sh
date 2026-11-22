@@ -13,7 +13,7 @@ else
   PUBLIC_KEY=$(bun -e "import {generateKeyPairSync} from 'node:crypto'; console.log(generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('base64'))")
   export PUBLIC_KEY EXACT_LINK_KIT="$RUNNER_TEMP/camera-kit"
   tar -xf "$RUNNER_TEMP/camera-kit.tar" -C "$RUNNER_TEMP"
-  bash "$GITHUB_WORKSPACE/.github/ios-composition-compile.sh" "$RUNNER_TEMP/camera-kit"
+  export EXACT_LINK_KIT_PROOF="$scripts/ios-selective-link.py"
   sed -i '' 's/Capture a moment/Independent camera capture/' app.contract
 fi
 bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id=process.env.APP_ID; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
@@ -32,8 +32,9 @@ PY
 if [[ $lane == producer ]]; then
   bash "$scripts/ios-link-kit-publish.sh"
   cp -R "$HOME/.cache/exact/ios-link-kit/$EXACT_REF" "$RUNNER_TEMP/camera-kit"
-  bash "$GITHUB_WORKSPACE/.github/ios-composition-capture.sh" "$RUNNER_TEMP/camera-kit"
+  bash "$scripts/ios-selective-capture.sh" "$RUNNER_TEMP/camera-kit"
   tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/camera-kit.tar" camera-kit
 else
+  grep -F 'compiled verified camera composition' "$RUNNER_TEMP/$lane-build.log"
   grep -F 'new production executable linked from verified inputs' "$RUNNER_TEMP/$lane-build.log"
 fi
