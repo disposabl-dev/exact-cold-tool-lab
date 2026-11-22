@@ -1,0 +1,27 @@
+name: Produce SDK-only iOS host catalog
+on:
+  push:
+    branches: [ios-all-host-producer-v1]
+permissions: {contents: read}
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+  EXACT_UPDATE_TRUST: production
+jobs:
+  producer:
+    runs-on: blacksmith-6vcpu-macos-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Build all SDK Swift targets
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.cache/exact/ios-link-kit" "$RUNNER_TEMP/kit-out"
+          ln -s "$RUNNER_TEMP/exact-ios-inputs/link" "$HOME/.cache/exact/ios-link-kit/$EXACT_REF"
+          bash .github/actions/exact-setup/scripts/ios-host-catalog-publish.sh
+          shasum -a 256 "$RUNNER_TEMP/kit-out/ios-host-catalog.zst"
+      - uses: actions/upload-artifact@v7.0.2
+        with: {name: ios-full-host-catalog, path: '${{ runner.temp }}/kit-out/ios-host-catalog.zst', retention-days: 1, compression-level: 0}
