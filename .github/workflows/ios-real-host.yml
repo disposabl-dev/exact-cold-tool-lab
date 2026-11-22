@@ -1,0 +1,60 @@
+name: Compare real iOS host cohorts
+on:
+  push:
+    branches: [ios-real-host-cohorts-v1]
+permissions: {contents: read}
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+  EXACT_UPDATE_TRUST: production
+  EXACT_UPDATE_GENESIS: '1'
+  EXACT_BUILD_NUMBER: '1'
+jobs:
+  sample:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: paperstack
+            repo: disposabl-dev/exact-cold-paperstack
+            commit: 0871045e29989ccedea3a3227e499053a201e89e
+          - name: trail
+            repo: disposabl-dev/exact-cold-trail-coach
+            commit: b081d589b2e23f1b16281f32a52fc260e55fea92
+    runs-on: blacksmith-12vcpu-macos-27
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: actions/checkout@v7.0.1
+        with: {repository: '${{ matrix.repo }}', ref: '${{ matrix.commit }}', path: sample, persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Build actual source graph with public test identity
+        shell: bash
+        run: |
+          rsync -a --exclude=.exact --exclude=node_modules --exclude=target "$GITHUB_WORKSPACE/sample/apps/apps/" "$NATIVE_APP_DIR/"
+          cd "$NATIVE_APP_DIR"
+          bun install --frozen-lockfile
+          unset EXACT_LINK_KIT_PROOF EXACT_LINK_KIT
+          export CONVEX_ORIGIN=wss://public-seed.invalid PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= EXACT_VERSION=0.1.0 EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake"
+          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
+          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios
+          python3 - <<'PY_ASSERT'
+          import json,os
+          from pathlib import Path
+          r=json.loads((Path(os.environ['RUNNER_TEMP'])/'ios-artifacts/apps.receipt.json').read_text()); print('REAL_SAMPLE_GRAPH',r['app']['id'],r['build']['compat']['inputs']['linked'],r['build']['graph']['extensions'])
+          PY_ASSERT
+      - name: Collect public SDK host objects
+        shell: bash
+        run: |
+          product="$CARGO_TARGET_DIR/apple-swift/ios-17.0-balanced/out/Products/Release-iphoneos"
+          mkdir -p "$RUNNER_TEMP/host-objects"
+          for file in "$product"/Exact*.o; do
+            name=$(basename "$file")
+            case "$name" in ExactComposition.o|ExactLaunchParts.o) continue;; esac
+            cp "$file" "$RUNNER_TEMP/host-objects/$name"
+          done
+          shasum -a 256 "$RUNNER_TEMP"/host-objects/*.o
+          tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/host-objects.tar" host-objects
+      - uses: actions/upload-artifact@v7.0.2
+        with: {name: 'ios-host-${{ matrix.name }}', path: '${{ runner.temp }}/host-objects.tar', retention-days: 1, compression-level: 0}
