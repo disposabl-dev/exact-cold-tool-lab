@@ -17,11 +17,11 @@ jobs:
         with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
       - name: Compile independent package graphs
         run: |
-          python3 .github/actions/exact-setup/scripts/android-package-producer.py "$EXACT" "$RUNNER_TEMP/isograph" camera device background-transfer
+          python3 .github/actions/exact-setup/scripts/android-package-producer.py "$EXACT" "$RUNNER_TEMP/isograph"
           cd "$EXACT/host/android"
-          ./gradlew --no-daemon --no-watch-fs --continue --write-verification-metadata sha256 \
-            --project-cache-dir "$RUNNER_TEMP/isograph-state" \
-            :catalog_camera:catalogJar :catalog_device:catalogJar :catalog_background_transfer:catalogJar
+          mapfile -t tasks < <(jq -r '.[] | select(.implementation.class != null) | ":catalog_" + (.name | gsub("-"; "_")) + ":catalogJar"' "$RUNNER_TEMP/isograph/packages.json")
+          ./gradlew --no-daemon --no-watch-fs --continue --max-workers=4 --write-verification-metadata sha256 \
+            --project-cache-dir "$RUNNER_TEMP/isograph-state" "${tasks[@]}"
           ls -lh "$RUNNER_TEMP/isograph/jars"
       - uses: actions/upload-artifact@v7.0.2
         if: always()
