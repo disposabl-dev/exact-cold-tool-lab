@@ -1,0 +1,29 @@
+name: Stage public compiler inputs for fresh-clone test
+on:
+  push:
+    branches: [promote-compiled]
+jobs:
+  publish:
+    runs-on: blacksmith-4vcpu-ubuntu-2604
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Collect independent production fixture builds
+        run: |
+          mkdir inputs
+          for row in '45007415411 compiled-android' '45007652207 compiled-ios'; do
+            read -r run artifact <<< "$row"
+            gh run watch "$run" --exit-status --interval 8
+            gh run download "$run" -n "$artifact" -D inputs
+          done
+          gh release download macos-publisher-v1 -p '*.tar.zst' -D inputs
+          cd inputs
+          for archive in *.zst; do
+            sha256sum "$archive" > "$archive.sha256"
+            zstd -tq "$archive"
+          done
+          gh release create compiled-inputs-v1 --target "$GITHUB_SHA" --title 'Compiled fixture inputs' --notes 'Synthetic public Android and iOS builds for cross-repository cache testing.' *
