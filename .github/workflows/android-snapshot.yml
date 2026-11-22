@@ -1,29 +1,13 @@
 name: Android read-only tool image cold benchmark
 on:
   push:
-    branches: [android-mounted-snapshot-v1]
-permissions: {contents: read}
+    branches: [android-snapshot-consumer-v2]
+permissions: {contents: read, actions: read}
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
   EXACT_TOOLS_ORIGIN: none
 jobs:
-  producer:
-    runs-on: blacksmith-16vcpu-ubuntu-2604
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with: {persist-credentials: false}
-      - uses: oven-sh/setup-bun@v2.2.0
-        with: {bun-version: '1.4.5'}
-      - run: command -v mksquashfs || (sudo apt-get update -qq && sudo apt-get install -y squashfs-tools)
-      - run: bash .github/android-snapshot.sh build
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: public-android-snapshot
-          path: '${{ runner.temp }}/android.squashfs*'
-          compression-level: 0
-          retention-days: 1
   fresh:
-    needs: producer
     runs-on: blacksmith-16vcpu-ubuntu-2604
     steps:
       - uses: actions/checkout@v7.0.1
@@ -31,7 +15,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2.2.0
         with: {bun-version: '1.4.5'}
       - uses: actions/download-artifact@v8.0.2
-        with: {name: public-android-snapshot, path: '${{ runner.temp }}'}
+        with: {name: public-android-snapshot, run-id: 45019448518, github-token: '${{ github.token }}', path: '${{ runner.temp }}'}
       - name: Check public image digest
         run: cd "$RUNNER_TEMP" && echo "$(cat android.squashfs.sha256)  android.squashfs" | sha256sum -c -
       - name: Mount and configure shared tool image

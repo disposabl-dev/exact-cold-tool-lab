@@ -50,9 +50,11 @@ mount)
     [[ -d "$mountpoint/home/$rel" ]] || continue
     overlay "$mountpoint/home/$rel" "$HOME/$rel" "leaf$((++idx))"
   done
-  for path in "$mountpoint/home/.rustup/toolchains/"*; do
-    overlay "$path" "$HOME/.rustup/toolchains/${path##*/}" rust
-  done
+  # Keep the runner's installed components and rustup's temp and toolchain directories on one filesystem.
+  original="$RUNNER_TEMP/runner-rustup"
+  mkdir -p "$original"
+  sudo mount --bind "$HOME/.rustup" "$original"
+  overlay "$mountpoint/home/.rustup:$original" "$HOME/.rustup" rust
   overlay "$mountpoint/home/.cache/exact/publisher" "$HOME/.cache/exact/publisher" publisher
   [[ $(git -C "$sdk" rev-parse HEAD) == "$EXACT_REF" ]]
   app="$HOME/exact-native/apps/apps"
