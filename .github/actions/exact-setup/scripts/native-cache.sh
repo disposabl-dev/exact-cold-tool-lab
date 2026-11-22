@@ -62,6 +62,26 @@ find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
 wait "$cargo_pid"
 if [[ $platform == android ]]; then
   wait "$gradle_pid"
+  python3 - "$target" "$EXACT" <<'PYTIME'
+import json, os, re, sys
+from pathlib import Path
+target, sdk = map(Path, sys.argv[1:])
+for name, sub in [('wgpu-hal', 'vendor/wgpu-hal'), ('exact-logic', 'logic')]:
+    package = sdk / sub
+    for path in target.glob('**/.fingerprint/' + name + '-*/run-build-script-*.json'):
+        locals = json.loads(path.read_text()).get('local', [])
+        for fact in locals:
+            if 'Precalculated' not in fact: continue
+            value = fact['Precalculated']; print(name, value)
+            match = re.fullmatch(r'(\d+)\.(\d+) \(([^)]+)\)', value)
+            if not match: continue
+            file = (package / match[3]).resolve()
+            if not file.is_relative_to(package) or not file.is_file(): continue
+            ns = int(match[1])*10**9 + int(match[2].ljust(9, '0'))
+            for item in package.rglob('*'):
+                if item.is_file() and not item.is_symlink(): os.utime(item, ns=(ns-10**9,ns-10**9))
+            os.utime(file, ns=(ns, ns))
+PYTIME
   echo 'org.gradle.caching=true' >> "$HOME/.gradle/gradle.properties"
 fi
 if [[ "$platform" == ios && -z "${EXACT_PUBLISH_TOOLS:-}" ]]; then

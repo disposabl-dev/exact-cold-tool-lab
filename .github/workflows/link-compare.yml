@@ -1,7 +1,7 @@
 name: Measure Android incremental release link
 on:
   push:
-    branches: [android-restore-v2]
+    branches: [android-stable-times]
 permissions:
   contents: read
 env:
