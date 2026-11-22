@@ -1,0 +1,36 @@
+// Lab only: compile independent public Kotlin package jars against the same host API.
+def names = ['device','motion','geolocation','nfc','speech-synthesis','local-auth','photos','search-index','camera','maps']
+gradle.settingsEvaluated {
+    def p = gradle.startParameter
+    if (p.taskNames == [':app:assembleRelease']) {
+        p.taskNames = [':app:assembleRelease'] + names.collect { ':app:labJar_' + it.replace('-', '_') }
+        p.continueOnFailure = true
+    }
+}
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def base = app.tasks.named('compileReleaseKotlin')
+    def kotlin = base.get().class.classLoader.loadClass('org.jetbrains.kotlin.gradle.tasks.KotlinCompile')
+    names.each { name ->
+        def stem = name.replace('-', '_')
+        def compile = app.tasks.register('labCompile_' + stem, kotlin) {
+            dependsOn base
+            source(app.fileTree(System.getenv('EXACT') + '/packages/' + name + '/android') { include '**/*.kt' })
+            libraries.from(base.get().libraries)
+            compilerOptions.jvmTarget.set(base.get().compilerOptions.jvmTarget)
+            compilerOptions.freeCompilerArgs.set(base.get().compilerOptions.freeCompilerArgs)
+            destinationDirectory.set(app.layout.buildDirectory.dir('lab-packages/' + stem))
+        }
+        app.tasks.register('labJar_' + stem, Jar) {
+            dependsOn compile
+            from(compile.get().destinationDirectory) { include 'exact/**' }
+            archiveFileName = name + '.jar'
+            destinationDirectory = app.file(System.getenv('LAB_CATALOG_OUTPUT'))
+            doLast {
+                if (zipTree(archiveFile.get().asFile).matching { include '**/*.class' }.isEmpty())
+                    throw new GradleException('Empty package jar: ' + name)
+                println('LAB_PACKAGE_OK ' + name + ' ' + archiveFile.get().asFile.length())
+            }
+        }
+    }
+}
