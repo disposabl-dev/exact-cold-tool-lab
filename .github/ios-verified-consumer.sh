@@ -38,13 +38,14 @@ bun -e '
 APP_DIR="$app" bun -e 'const {resolveApp}=await import(`${process.env.EXACT}/scripts/app.mjs`); resolveApp(process.env.APP_DIR).rust();'
 cargo fetch --locked --manifest-path "$app/.exact/shells/Cargo.toml"
 IOS_RESTORE_CARGO_SOURCE_MTIMES=1 bun "$scripts/ios-source-times.mjs" apply "$kitout/ios-source-times.json" "$app"
+python3 "$scripts/ios-cargo-precalculated.py" "$EXACT" "$app/.exact/shells/Cargo.toml" "$CARGO_TARGET_DIR" "$kitout/ios-source-times.json"
 # Capture Cargo's raw fingerprint diagnostics before Exact's progress filter.
 mkdir -p "$RUNNER_TEMP/cargo-trace-bin"
 export IOS_TRACE_REAL_CARGO=$(command -v cargo)
 cat > "$RUNNER_TEMP/cargo-trace-bin/cargo" <<'TRACE'
 #!/usr/bin/env bash
 set -o pipefail
-export CARGO_LOG=cargo::core::compiler::fingerprint=info
+export CARGO_LOG=cargo::core::compiler::fingerprint=trace
 printf 'command: cargo %s\n' "$*" >> "$RUNNER_TEMP/cargo-fingerprint.raw"
 "$IOS_TRACE_REAL_CARGO" "$@" 2> >(tee -a "$RUNNER_TEMP/cargo-fingerprint.raw" >&2)
 TRACE
