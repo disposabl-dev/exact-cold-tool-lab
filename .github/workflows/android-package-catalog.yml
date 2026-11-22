@@ -56,13 +56,20 @@ jobs:
           export LAB_JAR_DIR="$RUNNER_TEMP/catalog" LAB_EXTRA_DEVICE=1
           python3 - "$EXACT" <<'PYCODE'
           import pathlib,sys
-          root=pathlib.Path(sys.argv[1]); p=root/'scripts/agent-android.mjs'; s=p.read_text(); old='bound.flatMap((b) => b.dirs)'; new="bound.flatMap((b) => ['camera', 'device'].includes(b.extension) ? [] : b.dirs)"; assert s.count(old)==1; p.write_text(s.replace(old,new))
-          p=root/'host/android/app/build.gradle.kts'; s=p.read_text(); p.write_text(s+'\ndependencies { implementation(files(System.getenv("LAB_JAR_DIR") + "/camera.jar", System.getenv("LAB_JAR_DIR") + "/device.jar")) }\n')
+          root=pathlib.Path(sys.argv[1]); p=root/'scripts/agent-android.mjs'; s=p.read_text(); old='bound.flatMap((b) => b.dirs)'; new="bound.flatMap((b) => ['camera', 'device', 'motion', 'geolocation', 'nfc', 'speech-synthesis', 'local-auth', 'photos'].includes(b.extension) ? [] : b.dirs)"; assert s.count(old)==1; p.write_text(s.replace(old,new))
+          p=root/'host/android/app/build.gradle.kts'; s=p.read_text(); names=['camera','device','motion','geolocation','nfc','speech-synthesis','local-auth','photos']; jar_expr=','.join('System.getenv("LAB_JAR_DIR") + "/'+name+'.jar"' for name in names); p.write_text(s+'\ndependencies { implementation(files('+jar_expr+')) }\n')
           PYCODE
+          python3 - "$NATIVE_APP_DIR" <<'PYCONTRACT'
+          import json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]); p=root/'package.json'; x=json.loads(p.read_text()); names=['motion','geolocation','nfc','speech-synthesis','local-auth','photos']; x['dependencies'].update({('@exact/'+n):('file:.exact/checkout/packages/'+n) for n in names}); p.write_text(json.dumps(x,indent=2)+'\n')
+          modules=[('motion','motionStatus','MotionStatus'),('geolocation','geolocationStatus','GeolocationStatus'),('nfc','nfcStatus','NFCStatus'),('speech-synthesis','speechSynthesisState','SpeechSynthesisState'),('local-auth','localAuthStatus','LocalAuthStatus'),('photos','photoLibraryStatus','PhotoLibraryStatus')]; p=root/'app.contract'; text=p.read_text(); text='\n'.join('use '+source+', '+shape+' from "@exact/'+name+'"' for name,source,shape in modules)+'\n'+text; text=text.replace('component Apps\n','component Apps\n'+''.join('  resource lab'+str(i)+' = '+source+'() as shape '+shape+' else empty()\n' for i,(_,source,shape) in enumerate(modules))); text=text.replace('              text "Live counter" role=', ''.join('              text `status ${lab'+str(i)+'.available}`\n' for i in range(len(modules)))+'              text "Live counter" role='); p.write_text(text)
+          PYCONTRACT
+          (cd "$NATIVE_APP_DIR" && bun install)
           bash .github/camera-gradle-fixture.sh fresh
           mapping="$CARGO_TARGET_DIR/android/app/outputs/mapping/release/mapping.txt"
           grep -m1 -E '^exact\.camera\.CameraModule -> ' "$mapping"
           grep -m1 -E '^exact\.device\.DeviceModule -> ' "$mapping"
+          for prefix in motion geolocation nfc speechsynthesis localauth photos; do grep -m1 -E "^exact\.${prefix}\." "$mapping"; done
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: synthetic-catalog-consumer-apk
