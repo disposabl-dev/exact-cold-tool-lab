@@ -1,7 +1,7 @@
-name: Measure Android release link
+name: Measure Android incremental release link
 on:
   push:
-    branches: [link-comparison]
+    branches: [android-link-units]
 permissions:
   contents: read
 env:
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/upload-artifact@v7.0.2
         if: success() && matrix.platform == 'android'
         with:
-          name: compiled-android
+          name: compiled-android-v2
           compression-level: 0
           path: ${{ runner.temp }}/cargo-*.zst
           retention-days: 1

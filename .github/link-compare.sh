@@ -17,7 +17,7 @@ python3 - "$EXACT/scripts/cargo-check.mjs" <<'PYTHON'
 import sys,pathlib
 path=pathlib.Path(sys.argv[1]);text=path.read_text();old="return ['apple','ios','macos','tvos','android'].includes(kind)"
 assert text.count(old)==1
-path.write_text(text.replace(old,"return ['apple','ios','macos','tvos'].includes(kind)"))
+path.write_text(text.replace(old, """if (kind === 'android' && profile === 'release') return ['--config','profile.release.lto="off"','--config','profile.release.codegen-units=16'];\n  """ + old))
 PYTHON
 # Fix source timestamps only for the immutable SDK. Consumer files must stay fresh.
 git -C "$EXACT" ls-files -z | (cd "$EXACT" && xargs -0 -r touch -d '2020-01-01 UTC')
@@ -47,6 +47,10 @@ for version in first second; do
     du -h "$RUNNER_TEMP/cargo-android.zst"
     # Gradle writes resolved dependency coordinates and content-addressed task outputs.
     # Never publish the user home, signing output, properties, or local init scripts.
+    cd "$HOME/.gradle"
+    tar -cf - --exclude='*.lock' --exclude='*.lck' --exclude='*.part' caches/build-cache-1 caches/modules-2 caches/9.8.0 wrapper/dists | zstd -T0 -3 -o "$RUNNER_TEMP/cargo-gradle.zst"
+    du -h "$RUNNER_TEMP/cargo-gradle.zst"
+    cd "$CARGO_TARGET_DIR"
     du -sh "$HOME"/.gradle/caches/* "$HOME"/.gradle/wrapper/* | sort -h | tail -15
     du -sh "$CARGO_TARGET_DIR"/android/* | sort -h | tail -15
     cd "$fixed/apps/apps"
