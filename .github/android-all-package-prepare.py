@@ -5,7 +5,7 @@ rows=[]; dependencies=set(); paths=[]
 for p in sorted((root/'packages').glob('*/android/exact.json')):
  x=json.loads(p.read_text()); name=p.parent.parent.name; cls=x.get('class'); namespace=cls.rsplit('.',1)[0] if cls else None
  rows.append(dict(name=name, namespace=namespace, implementation=x))
- if namespace: paths.append(str(p.parent))
+ if namespace and name != "camera": paths.append(str(p.parent))
  dependencies.update(x.get('maven',[]))
 (out/'index.json').write_text(json.dumps(rows,indent=2)+'\n')
 gradle=root/'host/android/app/build.gradle.kts'; text=gradle.read_text();
