@@ -26,6 +26,8 @@ for name,meta,data in packages:
     (directory/'src/main/AndroidManifest.xml').write_text('<manifest xmlns:android="http://schemas.android.com/apk/res/android" />\n')
     deps=['androidx.browser:browser:1.9.0','androidx.activity:activity:1.9.0','androidx.webkit:webkit:1.16.0']+data.get('maven',[])
     kt='''import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import java.security.MessageDigest
 import groovy.json.JsonOutput
 plugins { id("com.android.library") }
@@ -48,12 +50,14 @@ tasks.register<Jar>("catalogJar") {
   destinationDirectory = file(OUTPUT)
   doLast {
     val digest = MessageDigest.getInstance("SHA-256")
-    val artifacts = configurations.getByName("releaseCompileClasspath").resolvedConfiguration.resolvedArtifacts
-      .filterNot { it.id.componentIdentifier is ProjectComponentIdentifier }
-      .map { a ->
+    val view = configurations.getByName("releaseCompileClasspath").incoming.artifactView {
+      componentFilter { it !is ProjectComponentIdentifier }
+      attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "android-classes-jar")
+    }
+    val artifacts = view.artifacts.artifacts.map { a ->
+        val id = a.id.componentIdentifier as ModuleComponentIdentifier
         val bytes = a.file.readBytes()
-        mapOf("group" to a.moduleVersion.id.group, "name" to a.name, "version" to a.moduleVersion.id.version,
-          "classifier" to (a.classifier ?: ""), "extension" to a.extension,
+        mapOf("group" to id.group, "name" to id.module, "version" to id.version,
           "sha256" to digest.digest(bytes).joinToString("") { "%02x".format(it) })
       }.sortedBy { it.toString() }
     file(OUTPUT + "/NAME-graph.json").writeText(JsonOutput.toJson(artifacts))
