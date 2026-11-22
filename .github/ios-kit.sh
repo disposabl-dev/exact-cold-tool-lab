@@ -34,6 +34,6 @@ for version in first; do
   tar -cf - \
     --exclude 'incremental' --exclude 'ModuleCache*' --exclude '*.pcm' --exclude '*.pch' \
     --exclude '*.sdk' --exclude '*.tbd' --exclude 'index' --exclude '*.ipa' --exclude '*.app' --exclude 'clients' \
-    balanced aarch64-apple-ios aarch64-apple-darwin apple-modules apple-swift bake-compiled exact-filesystem-tool | zstd -T0 -3 -o "$RUNNER_TEMP/cargo-ios.zst"
+    balanced aarch64-apple-ios aarch64-apple-darwin apple-modules bake-compiled exact-filesystem-tool | zstd -T0 -3 -o "$RUNNER_TEMP/cargo-ios.zst"
   du -h "$RUNNER_TEMP/cargo-ios.zst"
 done
