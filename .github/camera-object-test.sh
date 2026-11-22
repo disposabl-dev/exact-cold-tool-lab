@@ -19,6 +19,7 @@ else
   export PUBLIC_KEY EXACT_LINK_KIT="$RUNNER_TEMP/camera-kit"
   tar -xf "$RUNNER_TEMP/camera-kit.tar" -C "$RUNNER_TEMP"
   zstd -dc "$EXACT_LINK_KIT/cargo-delta.zst" | tar -xf - -C "$CARGO_TARGET_DIR"
+  tar -xf "$EXACT_LINK_KIT/swift-packages.tar" -C "$CARGO_TARGET_DIR"
   export EXACT_IOS_SOURCE_TIMES="$EXACT_LINK_KIT/camera-times.json"
   sed -i '' 's/Capture a moment/Independent camera capture/' app.contract
 fi
@@ -44,8 +45,10 @@ if [[ $lane == producer ]]; then
   [[ ${#captures[@]} == 1 ]]
   export IOS_CAPTURE_BASELINE="$RUNNER_TEMP/baseline.json"
   bash "$scripts/ios-cache-archive.sh" "$CARGO_TARGET_DIR" "$kit/cargo-delta.zst" "${captures[0]}"
-  du -h "$kit/cargo-delta.zst"
+  python3 "$GITHUB_WORKSPACE/.github/camera-package-cache.py" capture "$CARGO_TARGET_DIR" "$kit/swift-packages.tar"
+  du -h "$kit/cargo-delta.zst" "$kit/swift-packages.tar"
   tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/camera-kit.tar" camera-kit
 else
+  python3 "$GITHUB_WORKSPACE/.github/camera-package-cache.py" verify "$CARGO_TARGET_DIR" "$EXACT_LINK_KIT/swift-packages.tar"
   grep -F 'new production executable linked from verified inputs' "$RUNNER_TEMP/$lane-build.log"
 fi
