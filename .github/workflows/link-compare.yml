@@ -1,11 +1,12 @@
 name: Measure Android incremental release link
 on:
   push:
-    branches: [android-link-units]
+    branches: [android-restore-v2]
 permissions:
   contents: read
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  NATIVE_CACHE_RELEASE: https://github.com/disposabl-dev/exact-cold-tool-lab/releases/download/compiled-inputs-v2
   EXACT_TOOLS_ORIGIN: none
   EXACT_UPDATE_TRUST: production
   EXACT_UPDATE_GENESIS: '1'
@@ -30,15 +31,18 @@ jobs:
           platform: ${{ matrix.platform }}
           exact-ref: ${{ env.EXACT_REF }}
           bundle-version: ${{ matrix.platform == 'ios' && '3' || '4' }}
-      - name: Build a public production fixture, then change its identity and backend
-        shell: bash
+      - name: Restore compiler dependencies from release
+        run: bash .github/actions/exact-setup/scripts/native-cache.sh android
+      - name: Build different production fixture
         env:
-          PLATFORM: ${{ matrix.platform }}
-        run: bash .github/link-compare.sh
-      - uses: actions/upload-artifact@v7.0.2
-        if: success() && matrix.platform == 'android'
-        with:
-          name: compiled-android-v2
-          compression-level: 0
-          path: ${{ runner.temp }}/cargo-*.zst
-          retention-days: 1
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
+        run: |
+          cd "$NATIVE_APP_DIR"
+          export EXACT_KEYSTORE="$RUNNER_TEMP/unpublished.p12" EXACT_KEY_ALIAS=android EXACT_KEYSTORE_PASSWORD=standalone-test EXACT_KEY_PASSWORD=standalone-test
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$EXACT_KEYSTORE" -storepass:env EXACT_KEYSTORE_PASSWORD -keypass:env EXACT_KEY_PASSWORD -alias android -keyalg RSA -dname CN=Disposable -validity 2
+          export CONVEX_ORIGIN=wss://restored-fixture-456.convex.cloud EXACT_BAKE_OUTPUT="$RUNNER_TEMP/bake" EXACT_MOBILE_CHANNEL=base-1
+          export EXACT_UPDATE_SEED=$(openssl rand -base64 32)
+          sed -i 's/dev.disposabl.exact/dev.disposabl.different/g;s/com.example.apps-8d662a/dev.example.different/g' app.json
+          bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure android
+          unset EXACT_UPDATE_SEED
+          bun exact.mjs android --release --no-install --json > "$RUNNER_TEMP/result.json"
