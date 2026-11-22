@@ -4,7 +4,7 @@
 This is not a replacement for Exact's archive/signing checks. The caller must run
 Exact's normal packaging and validate that the receipt belongs to this source.
 """
-import argparse, hashlib, json, os, re, shutil, struct, subprocess, tempfile
+import argparse, hashlib, json, os, re, shutil, struct, subprocess
 from pathlib import Path
 
 COMPILED = ('module.rs', 'logic.rs', 'linked.rs', 'host.rs')
@@ -70,7 +70,8 @@ def facts(receipt, bake, app):
     # These exact, reviewed SDK hook variants differ only in scheduling the
     # optional SwiftPM compile. No other SDK orchestration source is ignored.
     hook_variants = {'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
-                     'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e'}
+                     'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
+                     'e79fa8d9b9f228f0b36130909643b436d27abd6c1882ae3f34189b6144ed8336'}
     for item in source['files']:
         if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item['sha256'] in hook_variants:
             item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
@@ -104,17 +105,15 @@ def runtime_grants(facts):
     def normalize(value):
         if value is None or value == '': return value
         if not isinstance(value,str): raise ValueError('Unexpected grant type; use normal Exact build')
-        lines=value.split('\n')
-        sockets=[(i,pattern.fullmatch(line)) for i,line in enumerate(lines) if line.startswith('net.websocket ')]
-        if len(sockets)!=1 or not sockets[0][1]: raise ValueError('Expected exactly one ordinary WSS grant')
-        index,match=sockets[0]
+        match=pattern.fullmatch(value)
+        if not match: raise ValueError('Only one wss WebSocket grant is eligible; use normal Exact build')
         origins.append(match.group(1))
-        lines[index]='net.websocket wss://<app-origin>'
-        return '\n'.join(lines)
+        return 'net.websocket wss://<app-origin>'
     for item in result['source']['files']:
         if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item.get('sha256') in (
             'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
-            'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e'):
+            'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
+                     'e79fa8d9b9f228f0b36130909643b436d27abd6c1882ae3f34189b6144ed8336'):
             item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
     compat=result['compat']
     for name in ('grantCeiling','rustGrants','javascriptGrants'):
@@ -126,7 +125,7 @@ def runtime_grants(facts):
     if len(set(origins)) != 1: raise ValueError('WebSocket grants name different origins; use normal Exact build')
     return result
 
-def main(composition_builder=None):
+def main():
     parser=argparse.ArgumentParser(); parser.add_argument('mode', choices=['create','link']); parser.add_argument('--app', default=os.getcwd()); parser.add_argument('--kit', required=True); parser.add_argument('--receipt', required=True); parser.add_argument('--bake', required=True); parser.add_argument('--out'); parser.add_argument('--proof')
     a=parser.parse_args(); kit=Path(a.kit).resolve(); current=facts(a.receipt,a.bake,a.app)
     if a.mode == 'create':
@@ -153,9 +152,7 @@ def main(composition_builder=None):
         if not a.out: raise ValueError('Link requires --out')
         record=load(kit/'kit.json')
         if record['toolchain'] != toolchain(): raise ValueError('Apple toolchain differs; use normal Exact build')
-        base,now=runtime_grants(record['facts']),runtime_grants(current)
-        differences=[k for k in sorted(base.keys()|now.keys()) if base.get(k)!=now.get(k)]
-        if differences: raise ValueError('Native inputs differ: '+', '.join(differences))
+        if runtime_grants(record['facts']) != runtime_grants(current): raise ValueError('Native inputs differ; use normal Exact build')
         if any(digest(kit/n)!=h for n,h in record['digests'].items()): raise ValueError('Kit digest mismatch')
         out=Path(a.out).resolve()
         if out.exists(): raise ValueError('Output already exists')
@@ -163,14 +160,7 @@ def main(composition_builder=None):
         # The SDK command has one output, two temporary linker paths, and three payloads.
         filelist=Path(str(out)+'.inputs')
         names=sorted(n for n in record['digests'] if n.endswith('.o'))
-        compilation=None
-        if composition_builder:
-            if '14-ExactComposition.o' not in names: raise ValueError('Missing camera composition object')
-            compilation=tempfile.TemporaryDirectory(prefix='.exact-composition-',dir=scratch)
-            composition=composition_builder(kit,current,Path(compilation.name))
-            filelist.write_text(' '.join(str(composition if n=='14-ExactComposition.o' else kit/n) for n in names))
-        else:
-            filelist.write_text(' '.join(str(kit/n) for n in names))
+        filelist.write_text(' '.join(str(kit/n) for n in names))
         cmd=[]
         for x in record['commands']:
             x=x.replace('@KIT@', str(kit))
@@ -182,10 +172,6 @@ def main(composition_builder=None):
             cmd.append(x)
         subprocess.run(cmd,check=True)
         verify_sections(out, a.bake)
-        if compilation:
-            marker=os.environ.get('EXACT_SELECTIVE_PROOF')
-            if marker: Path(marker).write_text(json.dumps({'composition':digest(composition),'executable':digest(out),'archive':current['archive']}))
-            compilation.cleanup()
         print('linked:',out)
 
 if __name__=='__main__': main()
