@@ -1,0 +1,31 @@
+name: Verify Android public compiler cache
+on:
+  push:
+    branches: [android-publisher-verify-20261122]
+permissions:
+  contents: read
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+jobs:
+  producer:
+    runs-on: blacksmith-8vcpu-ubuntu-2604
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/exact-setup
+        with:
+          platform: android
+          exact-ref: ${{ env.EXACT_REF }}
+          bundle-version: '5'
+      - name: Build public compiler cache
+        run: time bash .github/actions/exact-setup/scripts/android-compiler-cache.sh
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: public-android-compiler-cache
+          path: ${{ runner.temp }}/kit-out/*.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
