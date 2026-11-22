@@ -25,14 +25,14 @@ jobs:
           bash .github/camera-gradle-fixture.sh seed
           status=$?
           set -e
-          echo "LAB_CATALOG_EXIT $status"
+          echo "LAB_EXACT_WRAPPER_EXIT $status (catalog-only build intentionally does not assemble an APK)"
+          python3 .github/android-all-package-validate.py "$RUNNER_TEMP/catalog"
           ls -lh "$RUNNER_TEMP/catalog"
-          test -n "$(find "$RUNNER_TEMP/catalog" -name '*.jar' -print -quit)"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: public-android-catalog
           path: |
             ${{ runner.temp }}/catalog/*.jar
-            ${{ runner.temp }}/catalog/index.json
+            ${{ runner.temp }}/catalog/*.json
           if-no-files-found: error
           retention-days: 1

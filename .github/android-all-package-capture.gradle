@@ -3,7 +3,7 @@ import groovy.json.JsonSlurper
 def rows = new JsonSlurper().parse(new File(System.getenv('LAB_CATALOG_INDEX')))
 gradle.settingsEvaluated {
     def p = gradle.startParameter
-    if (p.taskNames == [':app:assembleRelease']) p.taskNames = [':app:assembleRelease'] + rows.findAll { it.namespace }.collect { ':app:labJar_' + it.name.replace('-', '_') }
+    if (p.taskNames == [':app:assembleRelease']) p.taskNames = rows.findAll { it.namespace }.collect { ':app:labJar_' + it.name.replace('-', '_') }
 }
 gradle.projectsEvaluated {
     def app = gradle.rootProject.project(':app'), compile = app.tasks.named('compileReleaseKotlin')
