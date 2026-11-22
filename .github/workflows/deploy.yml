@@ -2,7 +2,7 @@ name: Deploy app
 
 on:
   push:
-    branches: [test-public-install-transfer-228]
+    branches: [test-private-install-transfer-228]
     paths-ignore: [.github/workflows/publish.yml]
   workflow_dispatch:
     inputs:
@@ -41,7 +41,7 @@ jobs:
     outputs:
       convex_origin: ${{ steps.origin.outputs.convex_origin }}
       public_android: ${{ steps.first.outputs.first == 'true' && '[{"platform":"android","channel":"base-1"}]' || steps.updates.outputs.public_android }}
-      native_matrix: ${{ github.event.repository.visibility == 'public' && steps.first.outputs.first == 'true' && '[{"platform":"web"},{"platform":"ios","channel":"base-1"}]' || steps.first.outputs.first == 'true' && '[{"platform":"web"},{"platform":"android","channel":"base-1"},{"platform":"ios","channel":"base-1"}]' || steps.updates.outputs.matrix }}
+      native_matrix: ${{ false && steps.first.outputs.first == 'true' && '[{"platform":"web"},{"platform":"ios","channel":"base-1"}]' || steps.first.outputs.first == 'true' && '[{"platform":"android","channel":"base-1"}]' || steps.updates.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -107,7 +107,7 @@ jobs:
         env:
           CONVEX_ORIGIN: ${{ steps.origin.outputs.convex_origin }}
           EXACT_UPDATE_SEED: ${{ env.FIXTURE_SEED }}
-          PUBLIC_REPO: ${{ github.event.repository.visibility == 'public' }}
+          PUBLIC_REPO: ${{ false }}
         working-directory: apps/apps
         run: bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" plan
 
@@ -120,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.deploy.outputs.native_matrix || github.event.repository.visibility == 'public' && '[{"platform":"ios","channel":"base-1"}]' || '[{"platform":"web"},{"platform":"android","channel":"base-1"},{"platform":"ios","channel":"base-1"}]') }}
+        include: ${{ fromJSON(needs.deploy.outputs.native_matrix || false && '[{"platform":"ios","channel":"base-1"}]' || '[{"platform":"android","channel":"base-1"}]') }}
     runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-12vcpu-macos-27' || matrix.platform == 'android' && 'blacksmith-16vcpu-ubuntu-2604' || 'blacksmith-8vcpu-ubuntu-2604' }}
     timeout-minutes: 90
     environment: &native-environment
@@ -140,7 +140,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Prepare private Android release draft
-        if: matrix.platform == 'android' && github.event.repository.visibility == 'public'
+        if: matrix.platform == 'android' && false
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -196,8 +196,8 @@ jobs:
         working-directory: ${{ env.NATIVE_APP_DIR }}
         id: delivery
         env:
-          EXACT_PUBLIC_APK: ${{ matrix.platform == 'android' && github.event.repository.visibility == 'public' }}
-          GH_TOKEN: ${{ matrix.platform == 'android' && github.event.repository.visibility == 'public' && github.token || '' }}
+          EXACT_PUBLIC_APK: ${{ matrix.platform == 'android' && false }}
+          GH_TOKEN: ${{ matrix.platform == 'android' && false && github.token || '' }}
           EXACT_UPDATE_SEED: ${{ env.FIXTURE_SEED }}
         run: |
           scripts="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts"
@@ -228,19 +228,18 @@ jobs:
           cat "$RUNNER_TEMP/installer-$PLATFORM.json"
           if [[ "$PLATFORM" == android ]]; then
             url=$(jq -er .url "$RUNNER_TEMP/installer-android.json")
-            curl -qfsSL "$url" -o "$RUNNER_TEMP/recovered.apk"
+            id="${url#https://appdrop.app/d/}"
+            [[ "$id" =~ ^[a-zA-Z0-9]+$ ]]
+            curl -qfsSL "https://appdrop.app/api/drops/$id/file?revision=1" -o "$RUNNER_TEMP/recovered.apk"
             cmp "$RUNNER_TEMP/recovered.apk" "$RUNNER_TEMP/android-artifacts/android-production.apk"
-            scripts=.github/actions/exact-setup/scripts
-            retried=$(python3 "$scripts/release-apk.py" publish "$RUNNER_TEMP/recovered.apk")
-            [[ "$retried" == "$url" ]]
-            echo 'Anonymous full APK and replay both verified'
+            echo 'Original AppDrop APK downloaded anonymously with byte parity'
           fi
 
   public-android:
     name: Build Android production
     needs: deploy
     if: >-
-      !cancelled() && github.event_name == 'push' && github.event.repository.visibility == 'public' &&
+      !cancelled() && github.event_name == 'push' && false &&
       (needs.deploy.result == 'skipped' || (needs.deploy.result == 'success' && needs.deploy.outputs.public_android != '[]'))
     strategy:
       matrix:
