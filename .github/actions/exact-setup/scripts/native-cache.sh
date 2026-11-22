@@ -54,7 +54,11 @@ restore() (
 (cd "$EXACT" && git ls-files -z | xargs -0 touch -t 202001010000)
 find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
 if [[ $platform == android ]]; then
-  echo 'org.gradle.caching=true' >> "$HOME/.gradle/gradle.properties"
+  for pkg in "$EXACT/logic" "$EXACT/vendor/wgpu-hal"; do
+    find "$pkg" -type f -exec touch -t 201912310000 {} +
+    touch -t 202001010000 "$pkg/build.rs"
+  done
+  echo 'org.gradle.caching=true'  >> "$HOME/.gradle/gradle.properties"
 fi
 if [[ "$platform" == ios && -z "${EXACT_PUBLISH_TOOLS:-}" ]]; then
   publisher="$RUNNER_TEMP/ios-publisher"
