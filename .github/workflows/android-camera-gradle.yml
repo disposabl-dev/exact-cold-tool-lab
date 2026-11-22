@@ -18,7 +18,8 @@ jobs:
       - name: Run production camera cache producer
         run: |
           export GRADLE_USER_HOME="$HOME/.gradle" EXACT_KEYSTORE="$RUNNER_TEMP/seed-key.p12" EXACT_KEY_ALIAS=android
-          export EXACT_KEYSTORE_PASSWORD="$(openssl rand -hex 24)" EXACT_KEY_PASSWORD="$EXACT_KEYSTORE_PASSWORD"
+          export EXACT_KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
+          export EXACT_KEY_PASSWORD="$EXACT_KEYSTORE_PASSWORD"
           export GITHUB_ENV="$RUNNER_TEMP/fake-producer-env"
           : > "$GITHUB_ENV"
           trap 'rm -f "$EXACT_KEYSTORE"' EXIT
