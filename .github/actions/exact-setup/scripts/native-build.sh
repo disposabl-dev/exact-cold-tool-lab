@@ -7,16 +7,18 @@ if [[ "$platform" == android-link || "$platform" == ios-link ]]; then
   private_dir=$(mktemp -d "$RUNNER_TEMP/appdrop.XXXXXX")
   trap 'rm -rf "$private_dir"' EXIT
   case "$platform" in
-    android) file="$RUNNER_TEMP/android-artifacts/android-production.apk"; label=Android ;;
-    ios) file="$RUNNER_TEMP/ios-artifacts/apps.ipa"; label=iPhone ;;
+    android) file="$RUNNER_TEMP/android-artifacts/android-production.apk" ;;
+    ios) file="$RUNNER_TEMP/ios-artifacts/apps.ipa" ;;
   esac
-  if ! bunx --bun appdrop@0.8.0 "$file" --json > "$private_dir/result.json" 2> "$private_dir/log"; then
+  if [[ "$platform" == android && "${EXACT_PUBLIC_APK:-}" == true ]]; then
+    url=$(python3 "$(dirname "$0")/release-apk.py" publish "$file")
+  elif ! bunx --bun appdrop@0.8.0 "$file" --json > "$private_dir/result.json" 2> "$private_dir/log"; then
     echo '::error::AppDrop upload failed'; exit 1
+  else
+    url=$(jq -er '.url | select(test("^https://(www\\.)?appdrop\\.app/d/[A-Za-z0-9]+/?$"))' "$private_dir/result.json")
   fi
-  url=$(jq -er '.url | select(test("^https://(www\\.)?appdrop\\.app/d/[A-Za-z0-9]+/?$"))' "$private_dir/result.json")
   # Persist only the share link. AppDrop's management credential stays on this runner.
   jq -nc --arg url "$url" --arg scope "$EXACT_INSTALL_SCOPE" '{url:$url,scope:$scope}' > "$RUNNER_TEMP/installer-$platform.json"
-  printf '[Install on %s](%s)\n' "$label" "$url" >> "$GITHUB_STEP_SUMMARY"
   exit
 fi
 [[ "$CONVEX_ORIGIN" == wss://* ]] || { echo '::error::Invalid Convex WebSocket origin'; exit 1; }
