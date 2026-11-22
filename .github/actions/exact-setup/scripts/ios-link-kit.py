@@ -90,6 +90,18 @@ def facts(receipt, bake, app):
             'compat': inputs, 'source': source, 'topology': topology, 'metadata': native_metadata,
             'configuration': r['binary']['configuration']}
 
+def runtime_grants(facts):
+    # Exact enforces these app-specific permissions from the newly linked
+    # compat section. Its native capability roster still has to match, as do
+    # the four generated Rust files, complete Cargo configuration and archive.
+    result=json.loads(json.dumps(facts))
+    for name in ('grantCeiling','rustGrants','javascriptGrants'):
+        result['compat'].pop(name, None)
+    for artifact in result['topology']['artifacts']:
+        if artifact.get('name') == 'app.plan':
+            artifact.get('requires', {}).pop('grantCeiling', None)
+    return result
+
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument('mode', choices=['create','link']); parser.add_argument('--app', default=os.getcwd()); parser.add_argument('--kit', required=True); parser.add_argument('--receipt', required=True); parser.add_argument('--bake', required=True); parser.add_argument('--out'); parser.add_argument('--proof')
     a=parser.parse_args(); kit=Path(a.kit).resolve(); current=facts(a.receipt,a.bake,a.app)
@@ -117,7 +129,7 @@ def main():
         if not a.out: raise ValueError('Link requires --out')
         record=load(kit/'kit.json')
         if record['toolchain'] != toolchain(): raise ValueError('Apple toolchain differs; use normal Exact build')
-        if record['facts'] != current: raise ValueError('Native inputs differ; use normal Exact build')
+        if runtime_grants(record['facts']) != runtime_grants(current): raise ValueError('Native inputs differ; use normal Exact build')
         if any(digest(kit/n)!=h for n,h in record['digests'].items()): raise ValueError('Kit digest mismatch')
         out=Path(a.out).resolve()
         if out.exists(): raise ValueError('Output already exists')

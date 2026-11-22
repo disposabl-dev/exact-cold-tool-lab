@@ -23,6 +23,12 @@ with tempfile.TemporaryDirectory() as tmp:
     root=Path(tmp); a,ar,ab,aa=sample(root/'a','dev.test.a','First',b'first plan',b'first bytecode'); b,br,bb,ba=sample(root/'b','dev.test.b','Second',b'second plan',b'second bytecode')
     baseline=kit.facts(ar,ab,aa)
     assert baseline==kit.facts(br,bb,ba), 'content and identity should not change native eligibility'
+    first=copy.deepcopy(baseline); second=copy.deepcopy(baseline)
+    first['compat']['grantCeiling']='net.websocket wss://first.invalid'
+    second['compat']['grantCeiling']='net.websocket wss://second.invalid'
+    assert kit.runtime_grants(first)==kit.runtime_grants(second), 'runtime grants should come from the new compat section'
+    second['compat']['linked']=['router','notifications']
+    assert kit.runtime_grants(first)!=kit.runtime_grants(second), 'native capability changes must invalidate kit'
     b['binary']['configuration']['target']='different-target';br.write_text(json.dumps(b))
     assert baseline!=kit.facts(br,bb,ba), 'compiler configuration must invalidate kit'
     (ba/'.exact/shells/Cargo.toml').write_text('tampered')
