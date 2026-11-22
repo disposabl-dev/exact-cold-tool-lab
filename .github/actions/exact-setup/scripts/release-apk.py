@@ -1,9 +1,11 @@
 """Publish a verified APK to a public repository, keeping the release draft until its digest matches."""
+import fcntl
 import hashlib
 import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -29,7 +31,7 @@ def request(url, method="GET", data=None, mime="application/json"):
     with urllib.request.urlopen(urllib.request.Request(url, method=method, data=data, headers=headers), timeout=90) as response:
         return json.load(response)
 
-def prepare():
+def prepare_locked():
     state = Path(os.environ["RUNNER_TEMP"]) / "android-draft-release.json"
     if state.is_file():
         return request(f"{api}/{json.loads(state.read_text())['id']}")
@@ -46,6 +48,13 @@ def prepare():
     tmp.write_text(json.dumps({"id":release["id"]}))
     tmp.replace(state)
     return release
+
+def prepare():
+    # 'publish' can race a slow draft reservation on first builds.
+    lock = Path(os.environ["RUNNER_TEMP"]) / "android-draft-release.lock"
+    with lock.open("a") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        return prepare_locked()
 
 def publish(path):
     release = prepare()
@@ -80,6 +89,14 @@ def publish(path):
 if sys.argv[1:] == ["prepare"]:
     prepare()
 elif len(sys.argv) == 3 and sys.argv[1] == "publish":
-    print(publish(sys.argv[2]))
+    for attempt_index in range(3):
+        try:
+            print(publish(sys.argv[2]))
+            break
+        except (OSError, TimeoutError) as error:
+            if (isinstance(error, urllib.error.HTTPError) and error.code not in (404, 408, 409, 422, 429, 500, 502, 503, 504)) or attempt_index == 2:
+                raise
+            # Re-read the draft and its assets before repeating any write whose response was lost.
+            time.sleep(0.25 * (attempt_index + 1))
 else:
     raise ValueError("Expected prepare or publish <verified.apk>")
