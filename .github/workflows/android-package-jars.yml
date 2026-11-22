@@ -51,9 +51,10 @@ jobs:
           export LAB_EXTRA_DEVICE=1
           bash .github/camera-gradle-fixture.sh fresh
           apk="$RUNNER_TEMP/fresh-cameranotes.apk"
-          unzip -p "$apk" 'classes*.dex' | strings | grep -F 'Lexact/camera/CameraModule;' >/dev/null
-          unzip -p "$apk" 'classes*.dex' | strings | grep -F 'Lexact/device/DeviceModule;' >/dev/null
-          echo 'Final APK contains camera and device module classes.'
+          mapping="$CARGO_TARGET_DIR/android/app/outputs/mapping/release/mapping.txt"
+          grep -m1 -E '^exact\.camera\.CameraModule -> ' "$mapping"
+          grep -m1 -E '^exact\.device\.DeviceModule -> ' "$mapping"
+          echo 'Release mapping contains camera and device module classes.' 
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: independent-package-apk
