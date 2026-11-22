@@ -94,8 +94,16 @@ cat "$signing_dir/apk-signature.txt"
 APK_VERIFY_PASSWORD=$(jq -er '.password' <<< "$ANDROID_APK_SIGNING")
 export APK_VERIFY_PASSWORD
 expected_apk_cert=$(keytool -list -v -keystore "$signing_dir/signing.p12" -storepass:env APK_VERIFY_PASSWORD -alias android | sed -n 's/^[[:space:]]*SHA256: //p' | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
-actual_apk_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$signing_dir/apk-signature.txt")
-[[ -n "$expected_apk_cert" && "$expected_apk_cert" == "$actual_apk_cert" ]] || { echo '::error::APK signer does not match the selected key'; exit 1; }
+python3 - "$expected_apk_cert" "$signing_dir/apk-signature.txt" <<'PYCODE'
+import re, sys
+expected = sys.argv[1].lower()
+lines = open(sys.argv[2], encoding='utf-8').read().splitlines()
+digest_lines = [line for line in lines if 'certificate SHA-256 digest:' in line]
+digests = [re.search(r'certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$', line) for line in digest_lines]
+if (not re.fullmatch(r'[0-9a-f]{64}', expected) or not digests or
+        any(match is None or match.group(1).lower() != expected for match in digests)):
+    raise SystemExit('::error::APK signer does not match the selected key')
+PYCODE
 unset APK_VERIFY_PASSWORD
 echo 'apk_verified=true' >> "$GITHUB_OUTPUT"
 }
