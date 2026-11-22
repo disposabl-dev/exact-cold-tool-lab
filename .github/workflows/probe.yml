@@ -1,7 +1,7 @@
 name: Measure public delivery
 on:
   push:
-    branches: [public-delivery-ios-228]
+    branches: [public-ios-phased-transfer-228]
 permissions:
   contents: read
 env:
@@ -51,11 +51,16 @@ jobs:
           fi
           bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure '${{ matrix.platform }}'
           export EXACT_VERSION=0.1.0
-          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" '${{ matrix.platform }}'
-          file="$RUNNER_TEMP/ios-artifacts/apps.ipa"
-          (time bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$RUNNER_TEMP/drop/package/cli.mjs" "$file" --json > "$RUNNER_TEMP/drop-out") & link=$!
-          time bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" seed ios
-          wait "$link"
-          grep '^HTTP ' "$RUNNER_TEMP/drop-out" | sed -E 's,(/api/[^ ]*/)[[:alnum:]_-]+,\1item,g'
-          echo "Verified AppDrop upload returned a public install link"
-          python3 -c 'import json,sys,re; s=open(sys.argv[1]).read(); j=json.loads(s[s.index("{"):]); assert re.fullmatch("https://(www[.])?appdrop[.]app/d/[A-Za-z0-9]+/?",j["url"])' "$RUNNER_TEMP/drop-out"
+          cli="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts"
+          export DELIVERY_GATE=$(mktemp -d "$RUNNER_TEMP/phase.XXXXXX")
+          export APPDROP_LIB="$RUNNER_TEMP/drop/package/lib.mjs"
+          bash "$cli/native-build.sh" ios & builder=$!
+          trap 'if [[ -n "${uploader:-}" ]]; then kill "$uploader" 2>/dev/null || true; fi' EXIT
+          while [[ ! -f "$DELIVERY_GATE/archive-complete" ]]; do kill -0 "$builder"; sleep .05; done
+          bun "$GITHUB_WORKSPACE/.github/ios-phased-upload.mjs" "$RUNNER_TEMP/ios-artifacts/apps.ipa" & uploader=$!
+          wait "$builder"
+          python3 -c 'import time;print("IOS_VERIFIED",time.time_ns()//1000000)'
+          touch "$DELIVERY_GATE/verified"
+          wait "$uploader"
+          trap - EXIT
+          bun --preload "$GITHUB_WORKSPACE/.github/trace-fetch.mjs" "$cli/mobile-updates.mjs" seed ios

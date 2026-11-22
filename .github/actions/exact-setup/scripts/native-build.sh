@@ -31,6 +31,7 @@ if [[ "$platform" == ios ]]; then
     fi
   fi
   bun exact.mjs ios --device --release --unsigned --archive "$artifacts/apps.ipa" --json > "$artifacts/build.json"
+  touch "$DELIVERY_GATE/archive-complete"
   unzip -tq "$artifacts/apps.ipa" >/dev/null
   unzip -q "$artifacts/apps.ipa" -d "$RUNNER_TEMP/iphone-archive"
   apps=("$RUNNER_TEMP"/iphone-archive/Payload/*.app)
