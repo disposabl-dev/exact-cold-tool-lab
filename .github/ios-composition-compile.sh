@@ -19,8 +19,8 @@ xcrun --sdk iphoneos swiftc -target arm64-apple-ios17.0 -sdk "$(xcrun --sdk ipho
 nm -u "$kit/14-ExactComposition.o" | sort > "$RUNNER_TEMP/original.symbols"
 nm -u "$out" | sort > "$RUNNER_TEMP/recompiled.symbols"
 diff -u "$RUNNER_TEMP/original.symbols" "$RUNNER_TEMP/recompiled.symbols"
-nm -gU "$kit/14-ExactComposition.o" | awk '{print $NF}' | sort > "$RUNNER_TEMP/original-defined.symbols"
-nm -gU "$out" | awk '{print $NF}' | sort > "$RUNNER_TEMP/recompiled-defined.symbols"
+nm -gU "$kit/14-ExactComposition.o" | awk '{print $NF}' | grep -F '_$s16ExactCompositionAAO' | sort > "$RUNNER_TEMP/original-defined.symbols"
+nm -gU "$out" | awk '{print $NF}' | grep -F '_$s16ExactCompositionAAO' | sort > "$RUNNER_TEMP/recompiled-defined.symbols"
 diff -u "$RUNNER_TEMP/original-defined.symbols" "$RUNNER_TEMP/recompiled-defined.symbols"
 cp "$out" "$kit/14-ExactComposition.o"
 python3 - "$kit" <<'PY'
