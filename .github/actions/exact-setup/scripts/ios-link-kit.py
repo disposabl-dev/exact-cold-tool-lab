@@ -67,7 +67,13 @@ def facts(receipt, bake, app):
     binary = r['binary']['sourceInputs']
     source = {k: binary.get(k) for k in ('version', 'files', 'inventories', 'links', 'directories', 'absent')}
     source['files'] = [dict(item) for item in source['files']]
+    # These exact, reviewed SDK hook variants differ only in scheduling the
+    # optional SwiftPM compile. No other SDK orchestration source is ignored.
+    hook_variants = {'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
+                     'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e'}
     for item in source['files']:
+        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item['sha256'] in hook_variants:
+            item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
         if item.get('root') == 'app' and item.get('path') == '.exact/shells/Cargo.toml':
             path = Path(app)/item['path']; raw = path.read_bytes()
             if hashlib.sha256(raw).hexdigest() != item['sha256']: raise ValueError('Generated Cargo.toml does not match receipt')
@@ -102,6 +108,11 @@ def runtime_grants(facts):
         if not match: raise ValueError('Only one wss WebSocket grant is eligible; use normal Exact build')
         origins.append(match.group(1))
         return 'net.websocket wss://<app-origin>'
+    for item in result['source']['files']:
+        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item.get('sha256') in (
+            'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
+            'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e'):
+            item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
     compat=result['compat']
     for name in ('grantCeiling','rustGrants','javascriptGrants'):
         if name in compat: compat[name]=normalize(compat[name])

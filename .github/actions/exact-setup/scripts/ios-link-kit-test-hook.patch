@@ -1,8 +1,20 @@
 diff --git a/host/apple/build.mjs b/host/apple/build.mjs
-index 0d862c1d6..c9e3aff24 100644
+index 0d862c1d6..226e5cb7d 100644
 --- a/host/apple/build.mjs
 +++ b/host/apple/build.mjs
-@@ -1240,7 +1240,16 @@ async function main(args, lockHeld = false) {
+@@ -835,7 +835,10 @@ async function main(args, lockHeld = false) {
+     beside.push(step);
+     return { claim, step };
+   })();
+-  const hostCompile = embedOnly || early || (widgetCore && !coreFrameworkBuilt) ? null : startApple('swift', [...swiftArgs, '--target', 'ExactKit'], resolve(webBuildDir, 'swift-compile.log'),
++  // A stock TypeScript device app with a verified link kit can defer SwiftPM.
++  // If the kit is refused, the ordinary product build below compiles its dependencies.
++  const deferKitHost = !!process.env.EXACT_LINK_KIT_PROOF && !!process.env.EXACT_LINK_KIT && ios && device && production && !tv && !widgets && !embedOnly && !args.includes('--host') && !library && !existsSync(resolve(app.dir, 'modules')) && !app.manifest.intents && !app.manifest.widgets && !app.manifest.packages && !app.manifest.host?.ios?.swiftPackages;
++  const hostCompile = deferKitHost || embedOnly || early || (widgetCore && !coreFrameworkBuilt) ? null : startApple('swift', [...swiftArgs, '--target', 'ExactKit'], resolve(webBuildDir, 'swift-compile.log'),
+     { cwd: pkg, env: earlyEnv() });
+   if (hostCompile) beside.push(hostCompile);
+   // The host's two Rust modules (SVG islands, Canvas 2D on the GPU) are the
+@@ -1240,7 +1243,16 @@ async function main(args, lockHeld = false) {
        const same = cargoProfile === HOST_DEV && archive && existsSync(resolve(swiftBinDir, p)) && existsSync(linked) && readFileSync(linked, 'utf8') === from;
        if (!same) for (const stale of [p, `${p}.linked`]) rmSync(resolve(swiftBinDir, stale), { force: true });
        // The early build was this one's when nothing it linked from has changed.

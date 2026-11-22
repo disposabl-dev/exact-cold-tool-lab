@@ -4,11 +4,17 @@ set -euo pipefail
 : "${EXACT:?}" "${SETUP_EXACT_REF:?}"
 expected_ref=a55c5581c7e1a62cdee1f09367ea2909c74c7292
 original=0306f15724f34e8fd3bad29fff511ce16ae829c9625bedddc32e3a2fb684ba6a
-patched=ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4
+previous=ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4
+patched=d140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e
 script_dir=$(cd "$(dirname "$0")" && pwd)
 [[ "$SETUP_EXACT_REF" == "$expected_ref" && $(git -C "$EXACT" rev-parse HEAD) == "$expected_ref" ]] || { echo 'Unsupported Exact revision for iOS link kit' >&2; exit 1; }
 file="$EXACT/host/apple/build.mjs"
 actual=$(shasum -a 256 "$file" | awk '{print $1}')
+if [[ "$actual" == "$previous" ]]; then
+  git -C "$EXACT" apply --reverse --check "$script_dir/ios-link-kit-v1-hook.patch"
+  git -C "$EXACT" apply --reverse "$script_dir/ios-link-kit-v1-hook.patch"
+  actual=$(shasum -a 256 "$file" | awk '{print $1}')
+fi
 if [[ "$actual" == "$original" ]]; then
   git -C "$EXACT" apply --check "$script_dir/ios-link-kit-test-hook.patch"
   git -C "$EXACT" apply "$script_dir/ios-link-kit-test-hook.patch"
