@@ -1,7 +1,7 @@
-name: Android Camera Gradle cache experiment
+name: Compare cross-app Android R8 cache keys
 on:
   push:
-    branches: [android-camera-gradle-v1]
+    branches: [android-r8-public-cache]
 permissions:
   contents: read
 env:
@@ -16,6 +16,7 @@ jobs:
         with: {persist-credentials: false}
       - uses: ./.github/actions/exact-setup
         with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - run: printf '\norg.gradle.logging.level=info\norg.gradle.caching.debug=true\n' >> "$HOME/.gradle/gradle.properties"
       - name: Build public camera seed
         run: bash .github/camera-gradle-fixture.sh seed
       - name: Screen public Gradle cache
@@ -42,6 +43,7 @@ jobs:
         with: {name: vetted-camera-gradle, path: '${{ runner.temp }}/camera-cache'}
       - name: Restore public camera Gradle inputs
         run: zstd -dc "$RUNNER_TEMP/camera-cache/camera-gradle.zst" | tar -xf - -C "$HOME/.gradle"
+      - run: printf '\norg.gradle.logging.level=info\norg.gradle.caching.debug=true\n' >> "$HOME/.gradle/gradle.properties"
       - name: Build distinct Camera Notes APK
         run: bash .github/camera-gradle-fixture.sh fresh
       - uses: actions/upload-artifact@v7.0.2

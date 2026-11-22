@@ -15,7 +15,7 @@ for f in source.iterdir():
   with tarfile.open(f) as t:
    members=t.getmembers(); meta=t.extractfile('METADATA').read().decode('utf-8')
    ident=next((l for l in meta.splitlines() if l.startswith('identity=')),'').replace('\\:',':')
-   allowed=('ImmutableTransformExecution' in meta or ident in ('identity=:app:compileReleaseKotlin','identity=:canvas:compileReleaseKotlin'))
+   allowed=('ImmutableTransformExecution' in meta or ident in ('identity=:app:compileReleaseKotlin','identity=:canvas:compileReleaseKotlin','identity=:app:minifyReleaseWithR8'))
    forbidden=any(re.search(r'(?:\.apk|\.aab|\.so|\.p12|\.jks|receipt\.json)$',m.name,re.I) or m.issym() or m.islnk() for m in members)
    if not allowed or forbidden: continue
   shutil.copy2(f,target/f.name); count+=1
