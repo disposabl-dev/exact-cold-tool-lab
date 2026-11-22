@@ -1,0 +1,55 @@
+name: Test clean iOS Swift host scratch
+on:
+  push:
+    branches: [ios-host-scratch-v1]
+permissions: {contents: read}
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+  EXACT_UPDATE_TRUST: production
+  EXACT_UPDATE_GENESIS: '1'
+  EXACT_BUILD_NUMBER: '1'
+jobs:
+  producer:
+    runs-on: blacksmith-12vcpu-macos-27
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Build public camera producer
+        run: bash .github/camera-object-test.sh producer
+      - name: Capture first-party host outputs only
+        run: |
+          mkdir "$RUNNER_TEMP/host-inputs"
+          python3 .github/ios-host-scratch.py capture "$CARGO_TARGET_DIR/apple-swift/ios-17.0-balanced" "$RUNNER_TEMP/host-inputs"
+          tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/host-inputs.tar" host-inputs
+      - uses: actions/upload-artifact@v7.0.2
+        with: {name: ios-host-inputs, path: '${{ runner.temp }}/host-inputs.tar', retention-days: 1, compression-level: 0}
+  consumer:
+    needs: producer
+    runs-on: blacksmith-12vcpu-macos-27
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - uses: actions/download-artifact@v8.0.2
+        with: {name: ios-host-inputs, path: '${{ runner.temp }}'}
+      - name: Restore and build different graph normally
+        shell: bash
+        run: |
+          tar -xf "$RUNNER_TEMP/host-inputs.tar" -C "$RUNNER_TEMP"
+          python3 .github/ios-host-scratch.py restore "$RUNNER_TEMP/host-inputs" "$CARGO_TARGET_DIR/apple-swift/ios-17.0-balanced"
+          unset EXACT_LINK_KIT_PROOF EXACT_LINK_KIT
+          cd "$NATIVE_APP_DIR"
+          export APP_ID=dev.disposabl.cameraandpresence CONVEX_ORIGIN=wss://independent.invalid
+          export PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= EXACT_VERSION=0.1.0 EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake"
+          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id=process.env.APP_ID; a.link=["presence"]; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
+          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios 2>&1 | tee "$RUNNER_TEMP/consumer.log"
+          python3 - <<'PY_ASSERT'
+          import json,os
+          from pathlib import Path
+          r=json.loads((Path(os.environ['RUNNER_TEMP'])/'ios-artifacts/apps.receipt.json').read_text())
+          i=r['build']['compat']['inputs']; print('HOST_GRAPH',i['linked']); assert 'presence' in i['linked'] and 'native_views' in i['linked'] and i['trust']=='production'
+          PY_ASSERT
