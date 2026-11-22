@@ -1,0 +1,25 @@
+name: Precompile first-party Exact iPhone packages
+on:
+  push:
+    branches: [compile-first-party-ios-v1]
+permissions: {contents: read}
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+  EXACT_UPDATE_TRUST: production
+jobs:
+  ios:
+    runs-on: blacksmith-12vcpu-macos-27
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - run: bun .github/compile-ios-catalog.mjs
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: first-party-iphone-packages
+          path: ${{ runner.temp }}/catalog-output
+          compression-level: 0
+          retention-days: 3
