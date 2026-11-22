@@ -5,9 +5,10 @@ import { resolve, dirname, basename, join } from 'node:path';
 
 const sdk = process.env.EXACT, appDir = process.env.NATIVE_APP_DIR, temp = process.env.RUNNER_TEMP;
 const catalog = resolve(sdk,'packages'), deps = JSON.parse(readFileSync(resolve(appDir,'package.json'),'utf8'));
+const selection=(process.env.SELECT_PACKAGES||"").split(",").filter(Boolean);
 const names = readdirSync(catalog).filter(name => {
   const declaration = resolve(catalog,name,'apple/exact.json');
-  return existsSync(declaration) && JSON.parse(readFileSync(declaration)).targets.includes('ios');
+  return (!selection.length || selection.includes(name)) && existsSync(declaration) && JSON.parse(readFileSync(declaration)).targets.includes('ios');
 });
 for (const name of names) deps.dependencies['@exact/'+name] = 'file:.exact/checkout/packages/'+name;
 writeFileSync(resolve(appDir,'package.json'),JSON.stringify(deps));

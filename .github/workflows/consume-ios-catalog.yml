@@ -1,0 +1,64 @@
+name: Verify selective download from the Exact iPhone catalog
+on:
+  push:
+    branches: [consume-first-party-ios-v1]
+permissions: {contents: read, actions: read}
+env:
+  REPO: disposabl-dev/exact-cold-tool-lab
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_UPDATE_TRUST: production
+  SELECT_PACKAGES: camera,payments
+jobs:
+  catalog:
+    permissions: {contents: write, actions: read}
+    runs-on: blacksmith-4vcpu-ubuntu-2604
+    steps:
+      - env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -euo pipefail
+          gh run watch 45017050619 -R "$REPO" --exit-status --compact --interval 10
+          gh run view 45017050619 -R "$REPO" --json headSha --jq '.headSha' | grep -Fx 515d3ea709bec1653db216b61cd0ab76d8355e78
+      - uses: actions/download-artifact@v8.0.2
+        with: {run-id: '45017050619', name: first-party-iphone-packages, github-token: '${{ github.token }}', path: packages}
+      - env: {GH_TOKEN: '${{ github.token }}'}
+        working-directory: packages
+        run: |
+          set -euo pipefail
+          jq -e '(.results|length)==48 and all(.results[];.sha256|length==64)' index.json
+          gh release create ios-catalog-a55c558-lab-1 --target 515d3ea709bec1653db216b61cd0ab76d8355e78 -R "$REPO" --prerelease --title 'Exact first-party iPhone package catalog' --notes 'Public per-package Swift compiler inputs from pinned Exact, verified for arm64 iOS. Experimental.'
+          printf '%s\0' index.json *.tar.zst | xargs -0 -n 10 gh release upload ios-catalog-a55c558-lab-1 -R "$REPO"
+  use:
+    needs: catalog
+    runs-on: blacksmith-12vcpu-macos-27
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Fetch only camera, payments, and the shared package interface
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/selected"
+          cd "$RUNNER_TEMP/selected"
+          gh api "repos/$REPO/releases/tags/ios-catalog-a55c558-lab-1" > release.json
+          jq -r '.assets[]|select(.name|test("^(ExactPackage|ExactPkg_camera|ExactPkg_payments)-[0-9a-f]{20}.tar.zst$"))|[.name,.browser_download_url,.digest]|@tsv' release.json > chosen
+          [[ $(wc -l < chosen) -eq 3 ]]
+          kept="$CARGO_TARGET_DIR/apple-swift/ios-17.0-balanced/packages-kept"
+          mkdir -p "$kept"
+          while IFS=$'\t' read -r name url digest; do
+            curl -fsSL "$url" -o "$name"
+            echo "${digest#sha256:}  $name" | shasum -a 256 -c -
+            zstd -dc "$name" | tar -xf - -C "$kept"
+          done < chosen
+      - name: Verify both packages work without Swift compilation
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/catalog-probe"
+          cat > "$RUNNER_TEMP/catalog-probe/xcrun" <<'SH'
+          #!/bin/bash
+          case " $* " in *' swiftc '*) [[ " $* " == *' --version '* ]] || { echo "Unexpected package compilation" >&2; exit 99; };; esac
+          exec /usr/bin/xcrun "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/catalog-probe/xcrun"
+          PATH="$RUNNER_TEMP/catalog-probe:$PATH" bun .github/compile-ios-catalog.mjs
