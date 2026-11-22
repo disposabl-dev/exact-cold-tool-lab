@@ -4,7 +4,7 @@
 This is not a replacement for Exact's archive/signing checks. The caller must run
 Exact's normal packaging and validate that the receipt belongs to this source.
 """
-import argparse, hashlib, json, os, shutil, struct, subprocess
+import argparse, hashlib, json, os, re, shutil, struct, subprocess
 from pathlib import Path
 
 COMPILED = ('module.rs', 'logic.rs', 'linked.rs', 'host.rs')
@@ -91,15 +91,25 @@ def facts(receipt, bake, app):
             'configuration': r['binary']['configuration']}
 
 def runtime_grants(facts):
-    # Exact enforces these app-specific permissions from the newly linked
-    # compat section. Its native capability roster still has to match, as do
-    # the four generated Rust files, complete Cargo configuration and archive.
-    result=json.loads(json.dumps(facts))
+    # Only a single wss endpoint may vary across the public template's grants.
+    # Preserve each field, role, line count and every other native fact.
+    result=json.loads(json.dumps(facts)); origins=[]
+    pattern=re.compile(r'net\.websocket (wss://[A-Za-z0-9.-]+(?::[0-9]{1,5})?)')
+    def normalize(value):
+        if value is None or value == '': return value
+        if not isinstance(value,str): raise ValueError('Unexpected grant type; use normal Exact build')
+        match=pattern.fullmatch(value)
+        if not match: raise ValueError('Only one wss WebSocket grant is eligible; use normal Exact build')
+        origins.append(match.group(1))
+        return 'net.websocket wss://<app-origin>'
+    compat=result['compat']
     for name in ('grantCeiling','rustGrants','javascriptGrants'):
-        result['compat'].pop(name, None)
+        if name in compat: compat[name]=normalize(compat[name])
+    if not origins: raise ValueError('Missing wss WebSocket grant; use normal Exact build')
     for artifact in result['topology']['artifacts']:
-        if artifact.get('name') == 'app.plan':
-            artifact.get('requires', {}).pop('grantCeiling', None)
+        if artifact.get('name')=='app.plan' and 'grantCeiling' in artifact.get('requires', {}):
+            artifact['requires']['grantCeiling']=normalize(artifact['requires']['grantCeiling'])
+    if len(set(origins)) != 1: raise ValueError('WebSocket grants name different origins; use normal Exact build')
     return result
 
 def main():

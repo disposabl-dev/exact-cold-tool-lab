@@ -29,6 +29,17 @@ with tempfile.TemporaryDirectory() as tmp:
     assert kit.runtime_grants(first)==kit.runtime_grants(second), 'runtime grants should come from the new compat section'
     second['compat']['linked']=['router','notifications']
     assert kit.runtime_grants(first)!=kit.runtime_grants(second), 'native capability changes must invalidate kit'
+    for bad in ('net.fetch https://example.invalid', 'net.websocket ws://insecure.invalid',
+                'net.websocket wss://first.invalid\nfs.read app:/',
+                'net.websocket wss://one.invalid\nnet.websocket wss://two.invalid', ''):
+        invalid=copy.deepcopy(first); invalid['compat']['grantCeiling']=bad
+        try: kit.runtime_grants(invalid)
+        except ValueError: pass
+        else: raise AssertionError('unsupported grant was accepted: '+repr(bad))
+    different=copy.deepcopy(first); different['compat']['javascriptGrants']='net.websocket wss://other.invalid'
+    try: kit.runtime_grants(different)
+    except ValueError: pass
+    else: raise AssertionError('inconsistent origins were accepted')
     b['binary']['configuration']['target']='different-target';br.write_text(json.dumps(b))
     assert baseline!=kit.facts(br,bb,ba), 'compiler configuration must invalidate kit'
     (ba/'.exact/shells/Cargo.toml').write_text('tampered')
