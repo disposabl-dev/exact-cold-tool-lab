@@ -7,6 +7,7 @@ ref=$SETUP_EXACT_REF
 tag="v${SETUP_BUNDLE_VERSION}-exact-${ref}-bun-$SETUP_BUN_VERSION"
 release="https://github.com/disposabl-dev/disposabl-exact/releases/download/$tag"
 manifest="$scripts/../inputs.json"
+if [[ $SETUP_BUNDLE_VERSION -ge 9 ]]; then manifest="$scripts/../inputs-v${SETUP_BUNDLE_VERSION}.json"; fi
 staging=$(mktemp -d "$RUNNER_TEMP/exact-inputs.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 publisher=".cache/exact/publisher/$ref"
@@ -71,6 +72,12 @@ if [[ $platform == ios ]]; then
   if [[ -f "$ios_tools/link/arms/manifest.json" ]] && ! python3 "$scripts/ios-link-arms.py" restore --kit "$ios_tools/link" --target "$cargo_target"; then
     echo 'Using the standard Apple framework build for this runner.'
   fi
+  # Exact chooses entries by the current package sources, dependencies and compiler flags.
+  if [[ -d "$ios_tools/link/packages-kept" ]]; then
+    package_root="$cargo_target/apple-swift/ios-17.0-balanced"
+    mkdir -p "$package_root"
+    cp -R "$ios_tools/link/packages-kept" "$package_root/"
+  fi
   # Match the canonical public SDK checkout used by Cargo build scripts.
   (cd "$EXACT" && git ls-files -z | xargs -0 touch -t 202001010000)
   find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
@@ -80,6 +87,16 @@ if [[ $platform == ios ]]; then
     echo "EXACT_IOS_SOURCE_TIMES=$ios_tools/ios-source-times.json"
   } >> "$GITHUB_ENV"
 elif [[ $platform == android ]]; then
+  # Resolve the pinned host plugins while Exact bakes and compiles Rust. Keep
+  # Gradle's project state separate from the real app and its dependency locks.
+  (
+    prime="$RUNNER_TEMP/gradle-prime"
+    cp -R "$EXACT/host/android" "$prime"
+    metadata="$GITHUB_WORKSPACE/apps/apps/gradle-verification.xml"
+    if [[ -f "$metadata" ]]; then cp "$metadata" "$prime/gradle/verification-metadata.xml"; fi
+    cd "$prime"
+    exec ./gradlew --offline --daemon --no-watch-fs --dependency-verification=strict help
+  ) > "$RUNNER_TEMP/gradle-prime.log" 2>&1 < /dev/null &
   bash "$scripts/android-fast-profile.sh"
   echo 'org.gradle.caching=true' >> "$HOME/.gradle/gradle.properties"
   if [[ ! -f "$ANDROID_HOME/ndk/27.3.13750724/source.properties" || ! -f "$ANDROID_HOME/platforms/android-37.2/source.properties" || ! -f "$ANDROID_HOME/build-tools/37.0.0/source.properties" ]]; then
