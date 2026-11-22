@@ -21,7 +21,8 @@ ln -s "$EXACT" .exact/checkout
 bun install --frozen-lockfile
 export EXACT_KEYSTORE="$RUNNER_TEMP/public-fixture-signing.p12" EXACT_KEY_ALIAS=android
 # This random, disposable key never enters the archives.
-export EXACT_KEYSTORE_PASSWORD="$(openssl rand -hex 24)" EXACT_KEY_PASSWORD="$EXACT_KEYSTORE_PASSWORD"
+export EXACT_KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
+export EXACT_KEY_PASSWORD="$EXACT_KEYSTORE_PASSWORD"
 trap 'rm -f "$EXACT_KEYSTORE"' EXIT
 keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$EXACT_KEYSTORE" -storepass:env EXACT_KEYSTORE_PASSWORD -keypass:env EXACT_KEY_PASSWORD -alias android -keyalg RSA -dname CN=PublicFixture -validity 2 >/dev/null 2>&1
 export CONVEX_ORIGIN=wss://public-fixture.invalid EXACT_MOBILE_CHANNEL=base-1
