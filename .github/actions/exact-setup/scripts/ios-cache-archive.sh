@@ -87,4 +87,4 @@ if not files:
 with open(os.environ['LIST'], 'wb') as out:
     out.write(b'\0'.join(sorted(set(files))) + b'\0')
 PY
-tar -C "$target" --null -T "$list" -cf - | zstd -T0 -1 -o "$output"
+COPYFILE_DISABLE=1 tar -C "$target" --null -T "$list" -cf - | zstd -T0 -1 -o "$output"

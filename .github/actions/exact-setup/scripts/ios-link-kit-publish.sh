@@ -8,6 +8,14 @@ target="${IOS_CACHE_TARGET:-$HOME/.cache/exact-native/cargo}"
 bake="$RUNNER_TEMP/ios-artifacts/bake/ios-aarch64-apple-ios.baked"
 receipt="$RUNNER_TEMP/ios-artifacts/bake/ios-aarch64-apple-ios.build.json"
 archive="$target/aarch64-apple-ios/balanced/libapps_apple.a"
+# The public release must contain only the documented, synthetic seed.
+python3 - "$receipt" <<'PY_CHECK'
+import json, sys
+r=json.load(open(sys.argv[1])); i=r['compat']['inputs']; m=r['binary']['metadata']
+assert r['trust']=='production' and i['app']=='dev.disposabl.publicseed'
+assert i['keys']=={'mobile':'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='}
+assert m['delivery']['origin']=='https://appdrop.app/u/66687aadf862bd776c8fc18b8e9f8e20'
+PY_CHECK
 manifest=$(python3 - "$target" <<'PY'
 import glob, json, os, sys
 root=sys.argv[1]+'/apple-swift/*/out/Intermediates.noindex/XCBuildData/*.xcbuilddata/manifest.json'

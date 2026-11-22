@@ -87,7 +87,8 @@ def facts(receipt, bake, app):
     metadata = r['binary']['metadata']
     native_metadata = {k: v for k, v in metadata.items() if k not in ('app', 'delivery', 'keys')}
     return {'archive': products[0], 'compiled': {n:digest(Path(bake)/n) for n in COMPILED},
-            'compat': inputs, 'source': source, 'topology': topology, 'metadata': native_metadata}
+            'compat': inputs, 'source': source, 'topology': topology, 'metadata': native_metadata,
+            'configuration': r['binary']['configuration']}
 
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument('mode', choices=['create','link']); parser.add_argument('--app', default=os.getcwd()); parser.add_argument('--kit', required=True); parser.add_argument('--receipt', required=True); parser.add_argument('--bake', required=True); parser.add_argument('--out'); parser.add_argument('--proof')
@@ -99,9 +100,11 @@ def main():
         archives=[n for n in expected if n.endswith('.a')]
         if len(archives)!=1 or expected[archives[0]]!=current['archive']: raise ValueError('Receipt archive does not match')
         # Do not accept a kit carrying native frameworks or arbitrary external inputs.
+        developer=os.path.realpath(subprocess.check_output(['/usr/bin/xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()).split('/Platforms/', 1)[0]
+        allowed=(str(proof),developer,'/Applications','/usr','/System','/Library')
         for x in commands:
             path = x[2:] if x.startswith(('-L/', '-F/')) else x[1:] if x.startswith('@/') else x
-            if path.startswith('/') and not (path == str(proof) or path.startswith(str(proof)+'/') or path.startswith(('/Applications/', '/usr/', '/System/', '/Library/'))):
+            if path.startswith('/') and not any(os.path.realpath(path)==root or os.path.realpath(path).startswith(root+'/') for root in allowed):
                 raise ValueError('Unowned command path: '+x)
         kit.mkdir(parents=True)
         for n in expected: shutil.copyfile(proof/n,kit/n)

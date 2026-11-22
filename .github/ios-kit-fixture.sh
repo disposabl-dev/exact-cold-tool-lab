@@ -13,10 +13,14 @@ ln -s "$EXACT" .exact/checkout
 bun install --frozen-lockfile
 # The public canonical template is the fixture. No deployment credentials are used.
 export CONVEX_ORIGIN=wss://public-seed.invalid
-export EXACT_UPDATE_SEED=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-sed -i '' 's/dev.disposabl.exact/dev.disposabl.publicseed/g;s/com.example.apps-8d662a/dev.disposabl.publicseed/g' app.json
-bun "$scripts/mobile-updates.mjs" configure ios
-unset EXACT_UPDATE_SEED
+bun -e '
+  const p = "app.json", app = await Bun.file(p).json();
+  app.id = "dev.disposabl.publicseed"; app.app.id = app.id;
+  app.deploy.store.ios = "A";
+  app.deploy.signing = {key:"mobile", keys:{mobile:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}};
+  app.deploy.channel = "base-1"; app.deploy.channels = {"base-1":"appdrop"};
+  await Bun.write(p, JSON.stringify(app, null, 2) + "\n");
+'
 bundle="$HOME/.cache/exact/publisher/$EXACT_REF"
 mkdir -p "$bundle"
 curl -fsSL --retry 3 https://github.com/disposabl-dev/exact-cold-tool-lab/releases/download/compiled-inputs-v2/ios-publisher.tar.zst -o "$RUNNER_TEMP/publisher.zst"
@@ -24,6 +28,7 @@ echo "2bfa76b5d45615b58a97bd0c87d7591e59a4aecec1ccfd93d2aeeea8ed01a7f0  $RUNNER_
 zstd -dc "$RUNNER_TEMP/publisher.zst" | tar -xf - -C "$bundle"
 bun "$scripts/ios-baker.mjs" record "$bundle/exact-js-bake" "$RUNNER_TEMP/kit-out/ios-baker.json"
 bun "$scripts/ios-baker.mjs" enable "$RUNNER_TEMP/kit-out/ios-baker.json"
+export EXACT_IOS_BAKER_PATH="$bundle/exact-js-bake" EXACT_IOS_BAKER_SHA256="$(shasum -a 256 "$bundle/exact-js-bake" | cut -d ' ' -f1)"
 bash "$scripts/ios-link-kit-enable.sh"
 (cd "$EXACT" && git ls-files -z | xargs -0 touch -t 202001010000)
 find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
@@ -34,6 +39,7 @@ export PATH="$RUNNER_TEMP/capturebin:$PATH"
 bun exact.mjs ios --device --release --unsigned --archive "$RUNNER_TEMP/public-seed.ipa" --json > "$RUNNER_TEMP/public-seed.json"
 captures=("$RUNNER_TEMP"/evidence/cargo-ios.*)
 [[ ${#captures[@]} == 1 ]]
+bun "$scripts/ios-source-times.mjs" record "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" "$app" "$RUNNER_TEMP/kit-out/ios-source-times.json"
 bash "$scripts/ios-cache-archive.sh" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/kit-out/cargo-ios.zst" "${captures[0]}"
 bash "$scripts/ios-link-kit-publish.sh"
 tar -C "$HOME/.cache/exact/ios-link-kit/$EXACT_REF" -cf - . | zstd -T0 -3 -o "$RUNNER_TEMP/kit-out/ios-link-kit.zst"

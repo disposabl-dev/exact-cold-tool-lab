@@ -3,7 +3,7 @@
 
 Experimental. This does not establish source eligibility or publish a kit.
 """
-import argparse, hashlib, json, shutil
+import argparse, hashlib, json, os, shutil, subprocess
 from pathlib import Path
 
 p=argparse.ArgumentParser()
@@ -37,6 +37,8 @@ if len(modules)!=1: raise ValueError('Expected one Swift module')
 module=out/'ExactIOS.swiftmodule'; shutil.copyfile(modules[0],module)
 if digest(module)!=digest(modules[0]): raise ValueError('Copied Swift module mismatch')
 # The narrow prototype admits only normal Exact host executable links, no user frameworks.
+developer=os.path.realpath(subprocess.check_output(['/usr/bin/xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()).split('/Platforms/', 1)[0]
+allowed=(str(out),developer,'/Applications','/usr','/System','/Library')
 new=[]
 for x in args:
  if x=='@'+responses[0]: x='@'+str(out/'link.txt')
@@ -50,7 +52,7 @@ for x in args:
  elif x.startswith(str(target)+'/') or x.startswith('@'+str(target)+'/'): raise ValueError('Unexpected build input: '+x)
  # The recipe may refer only to captured project data or the local Apple SDK.
  path = x[2:] if x.startswith(('-L/', '-F/')) else x[1:] if x.startswith('@/') else x
- if path.startswith('/') and not (path == str(out) or path.startswith(str(out)+'/') or path.startswith(('/Applications/', '/usr/', '/System/', '/Library/'))):
+ if path.startswith('/') and not any(os.path.realpath(path) == root or os.path.realpath(path).startswith(root+'/') for root in allowed):
   raise ValueError('Uncaptured absolute linker path: '+x)
  new.append(x)
 (out/'commands.json').write_text(json.dumps(new,indent=2)); (out/'digests.json').write_text(json.dumps({x.name:digest(x) for x in [*copied,archive,module]},indent=2))
