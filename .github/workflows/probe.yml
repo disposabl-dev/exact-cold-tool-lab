@@ -1,0 +1,46 @@
+name: Measure fresh install runners
+on:
+  push:
+    branches: [first-install-runner-probe]
+permissions:
+  contents: read
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+  EXACT_UPDATE_TRUST: production
+  EXACT_UPDATE_GENESIS: 1
+  EXACT_MOBILE_CHANNEL: base-1
+  CONVEX_ORIGIN: wss://first-install-probe.invalid
+  EXACT_BUILD_NUMBER: 1
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: ios, runner: blacksmith-12vcpu-macos-27}
+          - {platform: android, runner: blacksmith-16vcpu-ubuntu-2604}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with:
+          platform: ${{ matrix.platform }}
+          exact-ref: ${{ env.EXACT_REF }}
+          bundle-version: '7'
+      - name: Build installer
+        shell: bash
+        working-directory: ${{ env.NATIVE_APP_DIR }}
+        run: |
+          export EXACT_UPDATE_SEED=$(openssl rand -base64 32)
+          export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/${{ matrix.platform }}-artifacts/bake"
+          if [[ '${{ matrix.platform }}' == android ]]; then
+            pw=$(openssl rand -hex 16)
+            export PROBE_PASS=$pw
+            keytool -genkeypair -alias android -keystore "$RUNNER_TEMP/probe.p12" -storetype pkcs12 -storepass:env PROBE_PASS -keypass:env PROBE_PASS -dname 'CN=Isolated runner test' -keyalg RSA -keysize 2048 -validity 1000 >/dev/null 2>&1
+            export ANDROID_APK_SIGNING=$(jq -nc --arg pw "$pw" --arg ks "$(base64 -w0 "$RUNNER_TEMP/probe.p12")" '{password:$pw,keystore:$ks}')
+          fi
+          bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure '${{ matrix.platform }}'
+          export EXACT_VERSION=0.1.0
+          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" '${{ matrix.platform }}'

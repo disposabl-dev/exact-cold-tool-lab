@@ -72,22 +72,6 @@ build() (
   bun exact.mjs android "$@" --json > "$signing_dir/build.json" || return
   cp "$(jq -er '.path' "$signing_dir/build.json")" "$output" || return
 )
-# Keep Gradle's existing caches and configuration, but add our capture in an isolated
-# user home. This avoids modifying the runner's shared Gradle configuration.
-gradle_home="$signing_dir/gradle-home"
-mkdir -p "$gradle_home/init.d"
-original_gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
-if [[ -d "$original_gradle_home" ]]; then
-  for entry in "$original_gradle_home"/* "$original_gradle_home"/.[!.]*; do
-    [[ -e "$entry" ]] || continue
-    case "${entry##*/}" in
-      init.d) cp -R "$entry"/. "$gradle_home/init.d/" ;;
-      *) ln -s "$entry" "$gradle_home/${entry##*/}" ;;
-    esac
-  done
-fi
-cp "$(dirname "$0")/android-gradle-capture.init.gradle" "$gradle_home/init.d/exact-capture.gradle"
-export GRADLE_USER_HOME="$gradle_home" EXACT_GRADLE_CAPTURE="$signing_dir/gradle.json"
 verify_apk() {
 "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/apksigner" verify --print-certs "$artifacts/android-production.apk" > "$signing_dir/apk-signature.txt"
 cat "$signing_dir/apk-signature.txt"
@@ -107,6 +91,29 @@ PYCODE
 unset APK_VERIFY_PASSWORD
 echo 'apk_verified=true' >> "$GITHUB_OUTPUT"
 }
+# Sideloading needs only the signed APK. Build the Play bundle when connected.
+if [[ "${ANDROID_PLAY_CONNECTED:-}" != true ]]; then
+  build "$ANDROID_APK_SIGNING" "$artifacts/android-production.apk" --release --no-install
+  verify_apk
+  exit
+fi
+: "${ANDROID_PLAY_UPLOAD_SIGNING:?Play upload signing is not configured}"
+# Keep Gradle's existing caches and configuration, but add our capture in an isolated
+# user home. This avoids modifying the runner's shared Gradle configuration.
+gradle_home="$signing_dir/gradle-home"
+mkdir -p "$gradle_home/init.d"
+original_gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
+if [[ -d "$original_gradle_home" ]]; then
+  for entry in "$original_gradle_home"/* "$original_gradle_home"/.[!.]*; do
+    [[ -e "$entry" ]] || continue
+    case "${entry##*/}" in
+      init.d) cp -R "$entry"/. "$gradle_home/init.d/" ;;
+      *) ln -s "$entry" "$gradle_home/${entry##*/}" ;;
+    esac
+  done
+fi
+cp "$(dirname "$0")/android-gradle-capture.init.gradle" "$gradle_home/init.d/exact-capture.gradle"
+export GRADLE_USER_HOME="$gradle_home" EXACT_GRADLE_CAPTURE="$signing_dir/gradle.json"
 if ! build "$ANDROID_APK_SIGNING" "$artifacts/android-production.apk" --release --no-install; then
   # A failing AAB task must not lose an otherwise buildable APK. Re-run the
   # supported Exact APK-only build; never trust an output left by a failed task.
@@ -120,11 +127,7 @@ if ! build "$ANDROID_APK_SIGNING" "$artifacts/android-production.apk" --release 
   exit 1
 fi
 verify_apk
-aab_signing=$ANDROID_APK_SIGNING
-if [[ "${ANDROID_PLAY_CONNECTED:-}" == true ]]; then
-  [[ -n "${ANDROID_PLAY_UPLOAD_SIGNING:-}" ]] || { echo '::error::Play upload signing is not configured'; exit 1; }
-  aab_signing=$ANDROID_PLAY_UPLOAD_SIGNING
-fi
+aab_signing=$ANDROID_PLAY_UPLOAD_SIGNING
 # Exact has already built both artifacts from the same staged inputs. If capture
 # was unavailable, retain the supported two-build route and cohort comparison.
 export EXACT_KEYSTORE="$signing_dir/bundle.p12" EXACT_KEY_ALIAS=android
