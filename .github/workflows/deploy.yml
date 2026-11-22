@@ -2,7 +2,7 @@ name: Deploy app
 
 on:
   push:
-    branches: [main]
+    branches: [test-public-install-transfer-228]
     paths-ignore: [.github/workflows/publish.yml]
   workflow_dispatch:
     inputs:
@@ -32,11 +32,11 @@ env:
 
 jobs:
   deploy:
-    if: github.event_name == 'push' && !(github.event.created && github.run_number == 1)
+    if: false
     runs-on: blacksmith-8vcpu-ubuntu-2604
     timeout-minutes: 45
     environment:
-      name: android-production
+      name: synthetic-install-benchmark
       deployment: false
     outputs:
       convex_origin: ${{ steps.origin.outputs.convex_origin }}
@@ -77,7 +77,7 @@ jobs:
         working-directory: apps/apps
         env:
           CONVEX_ORIGIN: ${{ steps.origin.outputs.convex_origin }}
-          EXACT_UPDATE_SEED: ${{ secrets.EXACT_UPDATE_SEED }}
+          EXACT_UPDATE_SEED: ${{ env.FIXTURE_SEED }}
         run: bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" first
       - uses: ./.github/actions/exact-setup
         if: steps.first.outputs.first != 'true'
@@ -106,7 +106,7 @@ jobs:
         if: steps.first.outputs.first != 'true'
         env:
           CONVEX_ORIGIN: ${{ steps.origin.outputs.convex_origin }}
-          EXACT_UPDATE_SEED: ${{ secrets.EXACT_UPDATE_SEED }}
+          EXACT_UPDATE_SEED: ${{ env.FIXTURE_SEED }}
           PUBLIC_REPO: ${{ github.event.repository.visibility == 'public' }}
         working-directory: apps/apps
         run: bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" plan
@@ -120,17 +120,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.deploy.outputs.native_matrix || github.event.repository.visibility == 'public' && '[{"platform":"web"},{"platform":"ios","channel":"base-1"}]' || '[{"platform":"web"},{"platform":"android","channel":"base-1"},{"platform":"ios","channel":"base-1"}]') }}
+        include: ${{ fromJSON(needs.deploy.outputs.native_matrix || github.event.repository.visibility == 'public' && '[{"platform":"ios","channel":"base-1"}]' || '[{"platform":"web"},{"platform":"android","channel":"base-1"},{"platform":"ios","channel":"base-1"}]') }}
     runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-12vcpu-macos-27' || matrix.platform == 'android' && 'blacksmith-16vcpu-ubuntu-2604' || 'blacksmith-8vcpu-ubuntu-2604' }}
     timeout-minutes: 90
     environment: &native-environment
-      name: android-production
+      name: synthetic-install-benchmark
       deployment: false
     defaults: &native-defaults
       run:
         shell: bash
     env: &native-env
-      CONVEX_ORIGIN: ${{ needs.deploy.outputs.convex_origin }}
+      CONVEX_ORIGIN: wss://public-transfer-lab.invalid
       EXACT_MOBILE_CHANNEL: ${{ matrix.channel }}
       EXACT_UPDATE_TRUST: production
       EXACT_UPDATE_GENESIS: '1'
@@ -153,31 +153,20 @@ jobs:
           exact-ref: ${{ env.EXACT_REF }}
           bun-version: ${{ env.BUN_VERSION }}
           bundle-version: ${{ env.BUNDLE_VERSION }}
-      - name: Install backend dependencies
-        working-directory: packages/backend
-        run: bun install --frozen-lockfile
-      - name: Resolve mobile backend on first push
-        if: matrix.platform != 'web' && needs.deploy.result == 'skipped'
-        working-directory: packages/backend
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-        run: *resolve-origin
-      - name: Install app dependencies
-        if: matrix.platform == 'web'
-        working-directory: apps/apps
-        run: *install-app
-      - name: Deploy web
-        if: matrix.platform == 'web'
-        working-directory: packages/backend
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-          EXPECTED_ORIGIN: ${{ needs.deploy.outputs.convex_origin }}
-        run: *deploy-web
+      - name: Generate disposable per-platform credentials
+        shell: bash
+        run: |
+          echo "FIXTURE_SEED=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          if [[ "${{ matrix.platform }}" == android ]]; then
+            export PW=$(openssl rand -hex 16)
+            keytool -genkeypair -alias android -keystore "$RUNNER_TEMP/test.p12" -storetype pkcs12 -storepass:env PW -keypass:env PW -dname 'CN=Public transfer fixture' -keyalg RSA -validity 365 -keysize 2048
+            echo "FIXTURE_SIGNING=$(jq -nc --arg pw "$PW" --arg ks "$(base64 -w0 "$RUNNER_TEMP/test.p12")" '{password:$pw,keystore:$ks}')" >> "$GITHUB_ENV"
+          fi
       - name: Configure updates
         if: matrix.platform != 'web'
         working-directory: ${{ env.NATIVE_APP_DIR }}
         env:
-          EXACT_UPDATE_SEED: ${{ secrets.EXACT_UPDATE_SEED }}
+          EXACT_UPDATE_SEED: ${{ env.FIXTURE_SEED }}
         run: |
           platform="${{ matrix.platform }}"
           scripts="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts"
@@ -191,9 +180,9 @@ jobs:
         id: native-build
         working-directory: ${{ env.NATIVE_APP_DIR }}
         env:
-          ANDROID_APK_SIGNING: ${{ matrix.platform == 'android' && secrets.ANDROID_APK_SIGNING || '' }}
-          ANDROID_PLAY_UPLOAD_SIGNING: ${{ matrix.platform == 'android' && vars.ANDROID_PLAY_CONNECTED == 'true' && secrets.ANDROID_PLAY_UPLOAD_SIGNING || '' }}
-          ANDROID_PLAY_CONNECTED: ${{ vars.ANDROID_PLAY_CONNECTED }}
+          ANDROID_APK_SIGNING: ${{ matrix.platform == 'android' && env.FIXTURE_SIGNING || '' }}
+          ANDROID_PLAY_UPLOAD_SIGNING: ${{ '' }}
+          ANDROID_PLAY_CONNECTED: 'false'
         run: bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" "${{ matrix.platform }}"
       - name: Publish the install link and seed signed updates
         if: ${{ !cancelled() && (matrix.platform == 'ios' && steps.native-build.outcome == 'success' || matrix.platform == 'android' && steps.native-build.outputs.apk_verified == 'true') }}
@@ -202,7 +191,7 @@ jobs:
         env:
           EXACT_PUBLIC_APK: ${{ matrix.platform == 'android' && github.event.repository.visibility == 'public' }}
           GH_TOKEN: ${{ matrix.platform == 'android' && github.event.repository.visibility == 'public' && github.token || '' }}
-          EXACT_UPDATE_SEED: ${{ secrets.EXACT_UPDATE_SEED }}
+          EXACT_UPDATE_SEED: ${{ env.FIXTURE_SEED }}
         run: |
           scripts="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts"
           platform="${{ matrix.platform }}"
@@ -220,15 +209,25 @@ jobs:
           if-no-files-found: error
           overwrite: true
           compression-level: 0
-      - name: Save the installer for compatible updates
+      - name: Verify joined output and successful early staging
         if: ${{ !cancelled() && steps.delivery.outcome == 'success' }}
-        working-directory: packages/backend
         env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
           PLATFORM: ${{ matrix.platform }}
+          GH_TOKEN: ${{ matrix.platform == 'android' && github.token || '' }}
         run: |
-          name=$(printf '%s' "$PLATFORM" | tr '[:lower:]' '[:upper:]')
-          bun run convex env set "EXACT_INSTALL_$name" "$(cat "$RUNNER_TEMP/installer-$PLATFORM.json")" --prod
+          cat "$RUNNER_TEMP/install-$PLATFORM.result"
+          cat "$RUNNER_TEMP/install-$PLATFORM-stage.log"
+          [[ $(cat "$RUNNER_TEMP/install-$PLATFORM.result") == ok ]]
+          cat "$RUNNER_TEMP/installer-$PLATFORM.json"
+          if [[ "$PLATFORM" == android ]]; then
+            url=$(jq -er .url "$RUNNER_TEMP/installer-android.json")
+            curl -qfsSL "$url" -o "$RUNNER_TEMP/recovered.apk"
+            cmp "$RUNNER_TEMP/recovered.apk" "$RUNNER_TEMP/android-artifacts/android-production.apk"
+            scripts=.github/actions/exact-setup/scripts
+            retried=$(python3 "$scripts/release-apk.py" publish "$RUNNER_TEMP/recovered.apk")
+            [[ "$retried" == "$url" ]]
+            echo 'Anonymous full APK and replay both verified'
+          fi
 
   public-android:
     name: Build Android production
