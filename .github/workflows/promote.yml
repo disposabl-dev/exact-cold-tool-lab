@@ -1,29 +1,46 @@
-name: Stage public compiler inputs for fresh-clone test
+name: Prepare public Android compiler image
 on:
   push:
-    branches: [promote-compiled]
+    branches: [android-cache-image]
+permissions:
+  contents: read
+  packages: write
 jobs:
-  publish:
-    runs-on: blacksmith-4vcpu-ubuntu-2604
-    permissions:
-      contents: write
-      actions: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+  image:
+    runs-on: blacksmith-8vcpu-ubuntu-2604
     steps:
-      - name: Collect independent production fixture builds
+      - name: Package public compiler dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+          IMAGE: ghcr.io/disposabl-dev/exact-cold-tool-lab/android-compiler
         run: |
-          mkdir inputs
-          for row in '45007415411 compiled-android' '45007652207 compiled-ios'; do
-            read -r run artifact <<< "$row"
-            gh run watch "$run" --exit-status --interval 8
-            gh run download "$run" -n "$artifact" -D inputs
-          done
-          gh release download macos-publisher-v1 -p '*.tar.zst' -D inputs
-          cd inputs
-          for archive in *.zst; do
-            sha256sum "$archive" > "$archive.sha256"
-            zstd -tq "$archive"
-          done
-          gh release create compiled-inputs-v1 --target "$GITHUB_SHA" --title 'Compiled fixture inputs' --notes 'Synthetic public Android and iOS builds for cross-repository cache testing.' *
+          set -euo pipefail
+          mkdir -p /tmp/layers/{cargo,gradle,home}
+          restore() (
+            base=$1 archive=$2 target=$3
+            cd /tmp
+            curl -fsSL --retry 3 "$base/$archive.sha256" -o "$archive.sha256"
+            curl -fsSL --retry 3 "$base/$archive" -o "$archive"
+            sha256sum -c "$archive.sha256"
+            zstd -dc "$archive" | tar -xf - -C "$target"
+          )
+          source="https://github.com/$GITHUB_REPOSITORY/releases/download/compiled-inputs-v2"
+          setup="https://github.com/disposabl-dev/disposabl-exact/releases/download/v4-exact-$REF-bun-1.4.5"
+          restore "$source" cargo-android.zst /tmp/layers/cargo & a=$!
+          restore "$source" cargo-gradle.zst /tmp/layers/gradle & b=$!
+          restore "$setup" "exact-$REF-android-Linux-X64-bun-1.4.5.tar.zst" /tmp/layers/home & c=$!
+          wait "$a"; wait "$b"; wait "$c"
+          cd /tmp/layers
+          cat >Dockerfile <<'DOCKER'
+          FROM busybox:1.37.0
+          LABEL org.opencontainers.image.source="https://github.com/disposabl-dev/exact-cold-tool-lab"
+          COPY --chown=1001:1001 cargo/ /seed/cargo/
+          COPY --chown=1001:1001 gradle/ /seed/gradle/
+          COPY --chown=1001:1001 home/ /seed/home/
+          DOCKER
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -t "$IMAGE:v2" .
+          docker push "$IMAGE:v2"
+          docker pull "$IMAGE:v2"
+          docker inspect "$IMAGE:v2" --format '{{index .RepoDigests 0}}' >> "$GITHUB_STEP_SUMMARY"
