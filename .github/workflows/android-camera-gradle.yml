@@ -1,7 +1,7 @@
 name: Compare parallel Gradle startup on fresh camera builds
 on:
   push:
-    branches: [android-gradle-overlap]
+    branches: [android-overlap-standard-cli]
 permissions:
   contents: read
 env:
@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [control, overlap]
+        mode: [control, filesystem, overlap]
     runs-on: blacksmith-16vcpu-ubuntu-2604
     timeout-minutes: 15
     steps:
@@ -30,12 +30,14 @@ jobs:
           LAB_MODE: ${{ matrix.mode }}
         run: |
           start=$SECONDS
-          if [[ $LAB_MODE == overlap ]]; then
+          if [[ $LAB_MODE != control ]]; then
             # Warm plugins on the public SDK in isolation. The real app still uses
             # Exact's dependency verification and its own generated Gradle graph.
             cp -R "$EXACT/host/android" "$RUNNER_TEMP/prime-android"
             cp "$NATIVE_APP_DIR/gradle-verification.xml" "$RUNNER_TEMP/prime-android/gradle/verification-metadata.xml"
             (cd "$RUNNER_TEMP/prime-android" && ./gradlew --offline --daemon --no-watch-fs --dependency-verification=strict help) > "$RUNNER_TEMP/warm.log" 2>&1 & primer=$!
+          fi
+          if [[ $LAB_MODE == overlap ]]; then
             python3 - "$EXACT/scripts/agent-android.mjs" <<'PYSDK'
           import pathlib,sys
           p=pathlib.Path(sys.argv[1]); s=p.read_text(); old="env.CI || graph.env.GRADLE_USER_HOME ? ['--no-daemon'] : []"
@@ -45,7 +47,7 @@ jobs:
           fi
           bash .github/camera-gradle-fixture.sh fresh
           echo "Build and verification elapsed: $((SECONDS - start))s"
-          if [[ $LAB_MODE == overlap ]]; then
+          if [[ $LAB_MODE != control ]]; then
             wait "$primer" || { cat "$RUNNER_TEMP/warm.log"; exit 1; }
             tail -6 "$RUNNER_TEMP/warm.log"
           fi
