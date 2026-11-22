@@ -2,7 +2,7 @@ name: Deploy app
 
 on:
   push:
-    branches: [test-public-install-transfer-228]
+    branches: [test-play-install-transfer-228]
     paths-ignore: [.github/workflows/publish.yml]
   workflow_dispatch:
     inputs:
@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: convex-web-${{ github.event_name }}-main
+  group: play-fixture-${{ github.ref_name }}
   queue: max
 
 env:
@@ -115,7 +115,7 @@ jobs:
     name: Build ${{ matrix.platform }} production
     needs: deploy
     if: >-
-      !cancelled() && github.event_name == 'push' &&
+      false && !cancelled() && github.event_name == 'push' &&
       (needs.deploy.result == 'skipped' || (needs.deploy.result == 'success' && needs.deploy.outputs.native_matrix != '[]'))
     strategy:
       fail-fast: false
@@ -188,8 +188,8 @@ jobs:
         working-directory: ${{ env.NATIVE_APP_DIR }}
         env:
           ANDROID_APK_SIGNING: ${{ matrix.platform == 'android' && env.FIXTURE_SIGNING || '' }}
-          ANDROID_PLAY_UPLOAD_SIGNING: ${{ '' }}
-          ANDROID_PLAY_CONNECTED: 'false'
+          ANDROID_PLAY_UPLOAD_SIGNING: ${{ env.FIXTURE_SIGNING }}
+          ANDROID_PLAY_CONNECTED: 'true'
         run: bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" "${{ matrix.platform }}"
       - name: Publish the install link and seed signed updates
         if: ${{ !cancelled() && (matrix.platform == 'ios' && steps.native-build.outcome == 'success' || matrix.platform == 'android' && steps.native-build.outputs.apk_verified == 'true') }}
@@ -234,6 +234,16 @@ jobs:
             retried=$(python3 "$scripts/release-apk.py" publish "$RUNNER_TEMP/recovered.apk")
             [[ "$retried" == "$url" ]]
             echo 'Anonymous full APK and replay both verified'
+            find "$RUNNER_TEMP/android-artifacts" -name '*.aab' -size +1M | grep .
+            early="$RUNNER_TEMP/installer-android.json"
+            output=$(mktemp); summary=$(mktemp)
+            (
+              cd "$NATIVE_APP_DIR"
+              export EXACT_UPDATE_SEED="$FIXTURE_SEED" GITHUB_OUTPUT="$output" GITHUB_STEP_SUMMARY="$summary" PUBLIC_REPO=true
+              bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" deliver android
+            )
+            grep -Fx 'android_native=false' "$output"
+            grep -F "$(jq -er .url "$early")" "$summary"
           fi
 
   public-android:
