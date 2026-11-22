@@ -1,9 +1,10 @@
 name: Measure Android incremental release link
 on:
   push:
-    branches: [android-restore-v2]
+    branches: [android-image-consume]
 permissions:
   contents: read
+  packages: read
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
   NATIVE_CACHE_RELEASE: https://github.com/disposabl-dev/exact-cold-tool-lab/releases/download/compiled-inputs-v2
@@ -26,6 +27,23 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      - name: Materialize compiler inputs from cached layers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ghcr.io/disposabl-dev/exact-cold-tool-lab/android-compiler@sha256:d6ad61f876981c052909a35606916931360d5cf68eb011c423fe4764a3efbe55
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          time docker pull "$IMAGE"
+          cid=$(docker create "$IMAGE" true)
+          trap 'docker rm -f "$cid" >/dev/null' EXIT
+          mkdir -p "$HOME/.cache/exact-native/cargo" "$HOME/.gradle"
+          for item in cargo gradle home; do
+            case $item in cargo) out="$HOME/.cache/exact-native/cargo";; gradle) out="$HOME/.gradle";; home) out="$HOME";; esac
+            time docker cp "$cid:/seed/$item/." - | tar -xf - -C "$out" &
+            pids+=($!)
+          done
+          for pid in "${pids[@]}"; do wait "$pid"; done
       - uses: ./.github/actions/exact-setup
         with:
           platform: ${{ matrix.platform }}

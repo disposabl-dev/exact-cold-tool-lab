@@ -34,7 +34,7 @@ extract_bundle() {
   if [[ "$platform" == "$SETUP_PLATFORM" ]]; then echo "source=$source_kind" >> "$GITHUB_OUTPUT"; fi
 }
 
-extract_bundle "$SETUP_PLATFORM"
+if [[ "$SETUP_PLATFORM" != android ]]; then extract_bundle "$SETUP_PLATFORM"; fi
 publisher=".cache/exact/publisher/$SETUP_EXACT_REF"
 if [[ "$SETUP_PLATFORM" == android ]]; then
   # The native bundle already supplies the matching host Hermes compiler.

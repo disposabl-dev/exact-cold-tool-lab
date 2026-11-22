@@ -50,18 +50,10 @@ restore() (
   shasum -a 256 -c "$archive.sha256"
   zstd -dc "$archive" | tar -xf - -C "$output"
 )
-restore "$archive" "$target" &
-cargo_pid=$!
-if [[ $platform == android ]]; then
-  restore cargo-gradle.zst "$HOME/.gradle" &
-  gradle_pid=$!
-fi
 # Cargo watches some directories as well as the individual SDK sources.
 (cd "$EXACT" && git ls-files -z | xargs -0 touch -t 202001010000)
 find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
-wait "$cargo_pid"
 if [[ $platform == android ]]; then
-  wait "$gradle_pid"
   echo 'org.gradle.caching=true' >> "$HOME/.gradle/gradle.properties"
 fi
 if [[ "$platform" == ios && -z "${EXACT_PUBLISH_TOOLS:-}" ]]; then
