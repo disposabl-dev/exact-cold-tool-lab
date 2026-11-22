@@ -44,7 +44,7 @@ gradle.projectsEvaluated {
         if (expected && matching.size() == 1) sources[name] = matching[0]
     }
     def candidates = sources.keySet().sort()
-    System.err.println('CATALOG candidates=' + candidates + ' dirs=' + dirs + ' sdk=' + sdk)
+    System.err.println('CATALOG candidates=' + candidates)
     if (!candidates) return
     try {
         def run = { List args ->
@@ -86,6 +86,7 @@ gradle.projectsEvaluated {
             throw error
         }
     } catch (Exception error) {
+        error.printStackTrace()
         System.err.println('Exact Android catalog unavailable; using original Kotlin sources (' + error.class.simpleName + ')')
     }
 }
