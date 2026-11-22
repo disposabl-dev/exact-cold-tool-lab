@@ -48,12 +48,13 @@ if (command === 'plan' && !platform) {
   }
   process.exit(0);
 }
-if (!['configure', 'deliver', 'seed'].includes(command) || !['ios', 'android'].includes(platform))
-  throw Error('expected plan or configure|deliver|seed ios|android');
+const probing = command === 'first' && !platform;
+if (!probing && (!['configure', 'deliver', 'seed'].includes(command) || !['ios', 'android'].includes(platform)))
+  throw Error('expected first, plan or configure|deliver|seed ios|android');
 
 const env = process.env;
 const { EXACT, EXACT_REF, GITHUB_REPOSITORY, GITHUB_SHA, CONVEX_ORIGIN } = env;
-if (!EXACT || !/^[a-f0-9]{40}$/.test(EXACT_REF) || !GITHUB_REPOSITORY ||
+if ((!probing && !EXACT) || !/^[a-f0-9]{40}$/.test(EXACT_REF) || !GITHUB_REPOSITORY ||
     !/^[a-f0-9]{40}$/.test(GITHUB_SHA) || !/^wss:\/\/[^/]+$/.test(CONVEX_ORIGIN))
   throw Error('Missing pinned SDK, commit, repository or Convex deployment origin');
 
@@ -74,20 +75,44 @@ const nativeFiles = execFileSync('git', ['ls-tree', '-rz', 'HEAD', '--', '.']).t
     if (iconPaths.has(path)) return true;
     return !/^(?:assets|deck)\//.test(path) && !/\.(?:ts|contract|md)$/.test(path);
   });
-const generation = createHash('sha256').update(JSON.stringify([
-  GITHUB_REPOSITORY, 'production', platform, CONVEX_ORIGIN,
-  EXACT_REF, manifest.version, nativeFiles,
-])).digest();
-const keyBytes = Buffer.from(hkdfSync('sha256', secret, generation, 'exact-updates-v1', 32));
+function updateKey(platform) {
+  const generation = createHash('sha256').update(JSON.stringify([
+    GITHUB_REPOSITORY, 'production', platform, CONVEX_ORIGIN,
+    EXACT_REF, manifest.version, nativeFiles,
+  ])).digest();
+  const keyBytes = Buffer.from(hkdfSync('sha256', secret, generation, 'exact-updates-v1', 32));
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), keyBytes]),
+    type: 'pkcs8', format: 'der',
+  });
+  keyBytes.fill(0);
+  const publicKey = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
+  return { privateKey, publicKey };
+}
+
+if (probing) {
+  // This read-only hint starts the three first builds in parallel. All other
+  // replies go through Exact's full compatibility and signature checks.
+  const empty = await Promise.all(['android', 'ios'].map(async target => {
+    const { publicKey } = updateKey(target);
+    const keyId = createHash('sha256').update(Buffer.from(publicKey, 'base64')).digest('hex').slice(0, 32);
+    try {
+      const response = await fetch(`https://appdrop.app/u/${keyId}/.exact/`, {
+        redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) return false;
+      const { names } = await response.json();
+      return Array.isArray(names) && names.length === 0;
+    } catch { return false; }
+  }));
+  secret.fill(0);
+  appendFileSync(env.GITHUB_OUTPUT, `first=${empty.every(Boolean)}\n`);
+  process.exit(0);
+}
+const { privateKey, publicKey } = updateKey(platform);
 secret.fill(0);
-const privateKey = createPrivateKey({
-  key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), keyBytes]),
-  type: 'pkcs8', format: 'der',
-});
-keyBytes.fill(0);
-const publicKey = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
 const [{ resolveApp, readBuilds, classifyArtifacts }, { openOrigin, appdropOrigin },
-  { streams, streamCandidates, publishStream, defaultRelease }, { canonicalBytes }] = await Promise.all(
+  { streams, streamCandidates, publishStream, defaultRelease, readBinaryInputFile }, { canonicalBytes }] = await Promise.all(
   ['app', 'origin', 'publisher', 'deploy-signing'].map(name => import(resolve(EXACT, 'scripts', name + '.mjs'))));
 manifest.deploy = { ...manifest.deploy,
   store: { ...manifest.deploy.store, [platform]: 'A' },
@@ -121,7 +146,9 @@ if (!/^base-[1-9][0-9]*$/.test(channel || '')) throw Error('Missing native updat
 manifest.deploy.channel = channel;
 manifest.deploy.channels = { [channel]: 'appdrop' };
 writeFileSync('app.json', JSON.stringify(manifest, null, 2) + '\n');
+const installScope = `${origin.describe()}/${channel}`;
 if (command === 'configure') {
+  appendFileSync(env.GITHUB_ENV, `EXACT_INSTALL_SCOPE=${installScope}\n`);
   appendFileSync(env.GITHUB_ENV, 'EXACT_VERSION=' + manifest.version + '\n');
   process.exit(0);
 }
@@ -157,7 +184,23 @@ for (const update of candidates) {
   }
   // SDK-generated shell paths differ between the Linux publisher and iOS builder.
   // The signing scope already binds the actual SDK and every tracked native app input.
+  // The macOS builder patches only the final linker invocation. Compare both
+  // files against the two reviewed variants before admitting a Linux publish.
+  const appleBuilder = 'host/apple/build.mjs';
+  let sameAppleBuilder = false;
+  if (platform === 'ios' && EXACT_REF === 'a55c5581c7e1a62cdee1f09367ea2909c74c7292' &&
+      update.build.pendingInputs.includes(`exact/${appleBuilder}`)) {
+    const known = new Set([
+      '0306f15724f34e8fd3bad29fff511ce16ae829c9625bedddc32e3a2fb684ba6a',
+      'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
+    ]);
+    const signed = await readBinaryInputFile(origin, update.row.receipt);
+    const recorded = signed && JSON.parse(signed.bytes).files.filter(file => file.root === 'exact' && file.path === appleBuilder);
+    const local = createHash('sha256').update(readFileSync(resolve(EXACT, appleBuilder))).digest('hex');
+    sameAppleBuilder = recorded?.length === 1 && known.has(recorded[0].sha256) && known.has(local);
+  }
   const changed = update.build.pendingInputs.filter(path =>
+    !(sameAppleBuilder && path === `exact/${appleBuilder}`) &&
     !(app.generated && /^(?:app\/\.exact\/shells|workspace)\/(?:Cargo\.(?:lock|toml)|rust-toolchain\.toml|(?:android|apple|web|linux|windows)\/(?:Cargo\.toml|build\.rs|src\/(?:main|lib)\.rs))$/.test(path)) &&
     !['exact/host/apple/Sources/ExactCore/GeneratedBatch.swift', 'exact/host/apple/Sources/ExactCore'].includes(path));
   if (changed.length) {
@@ -175,5 +218,15 @@ if (!compatible.length) {
       snapshot: { id: GITHUB_SHA, commit: GITHUB_SHA, dirty: false }, opts: {}, log: () => {} });
     console.log(platform, result.action, 'sequence', result.seq, origin.describe(), update.row.compatibilityId);
   }
-  if (command === 'deliver') appendFileSync(env.GITHUB_OUTPUT, platform + '_native=false\n');
+  if (command === 'deliver') {
+    appendFileSync(env.GITHUB_OUTPUT, platform + '_native=false\n');
+    // Reuse the installer only after Exact admits this update for the same stream.
+    let saved;
+    try { saved = JSON.parse(readFileSync(resolve(env.RUNNER_TEMP, `installer-${platform}.json`), 'utf8')); }
+    catch { /* Older deployments may have no saved installer. */ }
+    if (saved?.scope === installScope && /^https:\/\/(?:www\.)?appdrop\.app\/d\/[A-Za-z0-9]+\/?$/.test(saved.url)) {
+      const label = platform === 'ios' ? 'iPhone' : 'Android';
+      appendFileSync(env.GITHUB_STEP_SUMMARY, `[Install on ${label}](${saved.url})\n`);
+    }
+  }
 }

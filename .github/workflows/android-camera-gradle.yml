@@ -1,0 +1,52 @@
+name: Android Camera Gradle cache experiment
+on:
+  push:
+    branches: [android-camera-gradle-v1]
+permissions:
+  contents: read
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+jobs:
+  seed:
+    runs-on: blacksmith-16vcpu-ubuntu-2604
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Build public camera seed
+        run: bash .github/camera-gradle-fixture.sh seed
+      - name: Screen public Gradle cache
+        run: |
+          python3 .github/camera-gradle-vet.py "$RUNNER_TEMP/vetted-gradle"
+          tar -cf - -C "$RUNNER_TEMP/vetted-gradle" caches | zstd -T0 -3 -o "$RUNNER_TEMP/camera-gradle.zst"
+          ls -lh "$RUNNER_TEMP/camera-gradle.zst"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vetted-camera-gradle
+          path: ${{ runner.temp }}/camera-gradle.zst
+          compression-level: 0
+          retention-days: 1
+  fresh:
+    needs: seed
+    runs-on: blacksmith-16vcpu-ubuntu-2604
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - uses: actions/download-artifact@v8.0.2
+        with: {name: vetted-camera-gradle, path: '${{ runner.temp }}/camera-cache'}
+      - name: Restore public camera Gradle inputs
+        run: zstd -dc "$RUNNER_TEMP/camera-cache/camera-gradle.zst" | tar -xf - -C "$HOME/.gradle"
+      - name: Build distinct Camera Notes APK
+        run: bash .github/camera-gradle-fixture.sh fresh
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: synthetic-camera-apk
+          path: ${{ runner.temp }}/fresh-cameranotes.apk
+          retention-days: 1
+          compression-level: 0

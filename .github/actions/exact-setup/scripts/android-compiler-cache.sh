@@ -2,7 +2,7 @@
 # Publish only outputs from a public synthetic app built in fresh cache homes.
 set -euo pipefail
 : "${EXACT:?}" "${RUNNER_TEMP:?}" "${GITHUB_WORKSPACE:?}" "${GITHUB_SHA:?}"
-[[ ${GITHUB_REPOSITORY:-} == disposabl-dev/exact-cold-tool-lab ]] || { echo 'Android cache production is restricted to the canonical public repository' >&2; exit 1; }
+[[ ${GITHUB_REPOSITORY:-} == disposabl-dev/disposabl-exact ]] || { echo 'Android cache production is restricted to the canonical public repository' >&2; exit 1; }
 [[ "$EXACT" == "$HOME/work/_temp/exact-sdk" ]] || { echo 'Unexpected SDK path' >&2; exit 1; }
 root="$HOME/exact-native"
 target="$HOME/.cache/exact-native/cargo"

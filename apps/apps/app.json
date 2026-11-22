@@ -1,27 +1,27 @@
 {
   "$schema": ".exact/checkout/scripts/app.schema.json",
-  "name": "Apps",
-  "short_name": "Apps",
-  "id": "com.example.apps-8d662a",
+  "name": "Camera Notes",
+  "short_name": "Camera Notes",
+  "id": "dev.disposabl.cameranotes",
   "start_url": "/",
   "display": "standalone",
   "env": [
     "CONVEX_ORIGIN"
   ],
   "app": {
-    "id": "com.example.apps-8d662a",
-    "name": "Apps"
+    "id": "dev.disposabl.cameranotes",
+    "name": "Camera Notes"
   },
   "variants": {
     "preview": {
       "idSuffix": ".preview",
-      "name": "Apps Preview"
+      "name": "Camera Notes Preview"
     }
   },
   "host": {
     "web": {},
     "android": {
-      "id": "dev.disposabl.exact"
+      "id": "dev.disposabl.cameranotes"
     },
     "ios": {
       "minimumOS": "17.0",

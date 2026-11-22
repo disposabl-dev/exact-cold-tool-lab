@@ -10,6 +10,11 @@ else
   pin=$(bun -p 'Bun.TOML.parse(await Bun.file("rust-toolchain.toml").text()).toolchain.channel')
   host=$(rustc +"$pin" -vV | awk '/^host: / { print $2 }')
   paths=(".rustup/toolchains/$pin-$host" .cargo/hermes-lean-sys .cargo/registry/cache .cargo/registry/index .cargo/git/db)
+  if [[ "$SETUP_PLATFORM" == ios ]]; then
+    publisher=".cache/exact/publisher/$SETUP_EXACT_REF"
+    [[ -x "$HOME/$publisher/exact-bake" && -x "$HOME/$publisher/exact-js-bake" ]] || { echo 'Missing iOS publisher tools' >&2; exit 1; }
+    paths+=("$publisher")
+  fi
 fi
 present=()
 for path in "${paths[@]}"; do [[ ! -e "$HOME/$path" ]] || present+=("$path"); done

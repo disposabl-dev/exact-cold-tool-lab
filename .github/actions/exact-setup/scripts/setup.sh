@@ -27,4 +27,10 @@ else
   bun install --frozen-lockfile
   cargo +"$pin" fetch --locked
   for target in "${targets[@]}"; do cargo +"$pin" run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target "$target"; done
+  if [[ "$SETUP_PLATFORM" == ios ]]; then
+    # Seed the iOS stream with the same prebuilt publisher tools used on Linux.
+    CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_TARGET_DIR="$RUNNER_TEMP/exact-push-tools" cargo +"$pin" build --locked --release -p exact-bake -p exact-js-bake
+    mkdir -p "$HOME/.cache/exact/publisher/$SETUP_EXACT_REF"
+    cp "$RUNNER_TEMP/exact-push-tools/release/exact-bake" "$RUNNER_TEMP/exact-push-tools/release/exact-js-bake" "$HOME/.cache/exact/publisher/$SETUP_EXACT_REF/"
+  fi
 fi

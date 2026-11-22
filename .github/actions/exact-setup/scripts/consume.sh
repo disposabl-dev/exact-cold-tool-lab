@@ -42,8 +42,13 @@ if [[ "$SETUP_PLATFORM" == android ]]; then
 fi
 (cd "$EXACT" && bun install --frozen-lockfile)
 echo "EXACT=$EXACT" >> "$GITHUB_ENV"
-if [[ "$SETUP_PLATFORM" != ios ]]; then
+if [[ -x "$HOME/$publisher/exact-bake" && -x "$HOME/$publisher/exact-js-bake" ]]; then
   echo "EXACT_PUBLISH_TOOLS=$HOME/$publisher" >> "$GITHUB_ENV"
+elif [[ "$SETUP_PLATFORM" == ios ]]; then
+  # Older iOS bundles lack these tools and retain Exact's normal build-on-demand path.
+  echo 'iOS bundle has no publisher tools; Exact will build them when needed'
+else
+  echo "Missing publisher tools in $SETUP_PLATFORM bundle" >&2; exit 1
 fi
 
 if [[ "$SETUP_PLATFORM" == android ]]; then

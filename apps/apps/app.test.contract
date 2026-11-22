@@ -1,6 +1,6 @@
 test "the greeting loads"
   expect tree has "root"
-  expect text "greeting" == "Hello from Apps."
+  expect text "greeting" == "Hello from Camera Notes."
 
 test "the header's button likes it"
   tap "like"
