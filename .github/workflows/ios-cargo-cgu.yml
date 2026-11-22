@@ -58,4 +58,7 @@ jobs:
           codesign --verify --deep --strict "${apps[0]}"
           executable=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "${apps[0]}/Info.plist")
           xcrun lipo -verify_arch arm64 "${apps[0]}/$executable"
-          jq -e --slurpfile bake "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" '.build == $bake[0] and .build.trust=="production"' "${apps[0]}/receipt.json" >/dev/null
+          receipt="$RUNNER_TEMP/result.receipt.json"
+          jq -e --slurpfile bake "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" '.build == $bake[0] and .build.trust=="production"' "$receipt" >/dev/null
+          jq -e --slurpfile receipt "$receipt" '.compatibilityId == $receipt[0].compatibilityId and .build.trust=="production"' "${apps[0]}/receipt.json" >/dev/null
+          echo 'Verified ad-hoc signature, arm64 and production receipts.'
