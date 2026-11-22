@@ -26,3 +26,39 @@ jobs:
           export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake" EXACT_VERSION=0.1.0
           bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id=process.env.APP_ID; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
           bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios
+      - name: Prepare compact publisher tools
+        shell: bash
+        run: |
+          tar -C "$HOME/.cache/exact/publisher/$EXACT_REF" -cf "$RUNNER_TEMP/publisher.tar" exact-bake exact-js-bake
+          zstd -1 -q "$RUNNER_TEMP/publisher.tar" -o "$RUNNER_TEMP/publisher.tar.zst"
+          shasum -a 256 "$RUNNER_TEMP/publisher.tar.zst" > "$RUNNER_TEMP/publisher.sha256"
+          wc -c "$RUNNER_TEMP/publisher.tar.zst"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: slim-publisher
+          path: |
+            ${{ runner.temp }}/publisher.tar.zst
+            ${{ runner.temp }}/publisher.sha256
+          compression-level: 0
+          retention-days: 1
+  compact:
+    needs: profile
+    runs-on: blacksmith-12vcpu-macos-27
+    steps:
+      - name: Start transfer timer
+        run: date +%s > "$RUNNER_TEMP/start"
+      - uses: actions/download-artifact@v8.0.2
+        with: {name: slim-publisher, path: '${{ runner.temp }}/slim'}
+      - name: Verify and extract
+        shell: bash
+        run: |
+          date +%s > "$RUNNER_TEMP/download-end"
+          cd "$RUNNER_TEMP/slim"
+          expected=$(cut -d ' ' -f1 publisher.sha256)
+          actual=$(shasum -a 256 publisher.tar.zst | cut -d ' ' -f1)
+          [[ $expected == "$actual" ]]
+          mkdir unpacked
+          zstd -dc publisher.tar.zst | tar -xf - -C unpacked
+          date +%s > "$RUNNER_TEMP/restore-end"
+          test -x unpacked/exact-bake && test -x unpacked/exact-js-bake
+          echo "PROFILE slim_transfer=$(($(cat "$RUNNER_TEMP/download-end")-$(cat "$RUNNER_TEMP/start")))s slim_verify_extract=$(($(cat "$RUNNER_TEMP/restore-end")-$(cat "$RUNNER_TEMP/download-end")))s"
