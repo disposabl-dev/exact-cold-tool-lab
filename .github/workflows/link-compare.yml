@@ -1,0 +1,44 @@
+name: Measure Android release link
+on:
+  push:
+    branches: [link-comparison]
+permissions:
+  contents: read
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+  EXACT_UPDATE_TRUST: production
+  EXACT_UPDATE_GENESIS: '1'
+  EXACT_BUILD_NUMBER: '1'
+  CARGO_PROFILE_RELEASE_LTO: 'off'
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+  CARGO_PROFILE_BALANCED_LTO: 'off'
+  CARGO_PROFILE_SIZE_LTO: 'off'
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [android]
+    runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-6vcpu-macos-27' || 'blacksmith-8vcpu-ubuntu-2604' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/exact-setup
+        with:
+          platform: ${{ matrix.platform }}
+          exact-ref: ${{ env.EXACT_REF }}
+          bundle-version: ${{ matrix.platform == 'ios' && '3' || '4' }}
+      - name: Build a public production fixture, then change its identity and backend
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: bash .github/link-compare.sh
+      - uses: actions/upload-artifact@v7.0.2
+        if: success() && matrix.platform == 'android'
+        with:
+          name: compiled-android
+          compression-level: 0
+          path: ${{ runner.temp }}/cargo-*.zst
+          retention-days: 1
