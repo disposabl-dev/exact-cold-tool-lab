@@ -19,4 +19,5 @@ for r in m['records']:
         dst=out/p.name
         assert not dst.exists()
         shutil.copy2(p,dst)
+        dst.chmod(0o755 if p == binary else 0o644)
 print('Restored',len(m['records']),'verified helper records')

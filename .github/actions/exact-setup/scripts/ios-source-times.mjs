@@ -46,11 +46,12 @@ if (command === 'record' && args.length === 3) {
   const [manifestPath, appPath] = args.map(absolute), appRoot = realpathSync(appPath);
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   if (manifest.version !== 1 || manifest.exactRef !== ref || manifest.sdkPath !== sdk || manifest.appPath !== appRoot || manifest.cargoPath !== cargo || !Array.isArray(manifest.files) || manifest.files.length > 100000) throw Error('source timestamp manifest does not match checkout');
+  const profileStart = performance.now();
   // Ask the stock SDK to generate the consumer shell, including Cargo.lock.
   const {resolveApp} = await import(resolve(sdk, 'scripts/app.mjs'));
   const app = resolveApp(appRoot);
   if (!app.generated || !existsSync(resolve(appRoot, 'app.ts')) || existsSync(resolve(appRoot, 'data/Cargo.toml')) || app.manifest.game || app.manifest.library || app.hasGpu || app.manifest.share_target || app.manifest.host?.ios?.appClip || app.manifest.widgets?.length || app.manifest.live_activities?.length) throw Error('only a stock generated TypeScript app is supported');
-  app.rust();
+  const beforeRust = performance.now(); app.rust(); const afterRust = performance.now();
   let restored = 0, changed = 0;
   const seen = new Set();
   for (const entry of manifest.files) {
@@ -75,5 +76,6 @@ if (command === 'record' && args.length === 3) {
     utimesSync(path, atime, time);
     restored++;
   }
+  if (process.env.IOS_PROFILE_SOURCE_TIMES === '1') console.log(`source times: init ${(beforeRust-profileStart).toFixed(0)}ms, workspace ${(afterRust-beforeRust).toFixed(0)}ms, verify ${(performance.now()-afterRust).toFixed(0)}ms`);
   console.log(`Restored ${restored} matching source timestamps; ${changed} changed or missing files will rebuild`);
 } else throw Error('usage: ios-source-times.mjs record <build.json> <app-dir> <new-manifest> | apply <manifest> <app-dir>');
