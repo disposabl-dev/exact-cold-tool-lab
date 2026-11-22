@@ -1,7 +1,7 @@
 name: Test clean iOS Swift host scratch
 on:
   push:
-    branches: [ios-host-scratch-v1]
+    branches: [ios-host-scratch-db-v1]
 permissions: {contents: read}
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
