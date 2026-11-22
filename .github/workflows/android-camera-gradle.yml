@@ -1,54 +1,51 @@
-name: Compare cross-app Android R8 cache keys
+name: Compare parallel Gradle startup on fresh camera builds
 on:
   push:
-    branches: [android-r8-public-cache]
+    branches: [android-gradle-overlap]
 permissions:
   contents: read
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
   EXACT_TOOLS_ORIGIN: none
 jobs:
-  seed:
-    runs-on: blacksmith-16vcpu-ubuntu-2604
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with: {persist-credentials: false}
-      - uses: ./.github/actions/exact-setup
-        with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
-      - run: printf '\norg.gradle.logging.level=info\norg.gradle.caching.debug=true\n' >> "$HOME/.gradle/gradle.properties"
-      - name: Build public camera seed
-        run: bash .github/camera-gradle-fixture.sh seed
-      - name: Screen public Gradle cache
-        run: |
-          python3 .github/camera-gradle-vet.py "$RUNNER_TEMP/vetted-gradle"
-          tar -cf - -C "$RUNNER_TEMP/vetted-gradle" caches | zstd -T0 -3 -o "$RUNNER_TEMP/camera-gradle.zst"
-          ls -lh "$RUNNER_TEMP/camera-gradle.zst"
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: vetted-camera-gradle
-          path: ${{ runner.temp }}/camera-gradle.zst
-          compression-level: 0
-          retention-days: 1
   fresh:
-    needs: seed
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [control, overlap]
     runs-on: blacksmith-16vcpu-ubuntu-2604
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with: {persist-credentials: false}
       - uses: ./.github/actions/exact-setup
         with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
-      - uses: actions/download-artifact@v8.0.2
-        with: {name: vetted-camera-gradle, path: '${{ runner.temp }}/camera-cache'}
-      - name: Restore public camera Gradle inputs
-        run: zstd -dc "$RUNNER_TEMP/camera-cache/camera-gradle.zst" | tar -xf - -C "$HOME/.gradle"
-      - run: printf '\norg.gradle.logging.level=info\norg.gradle.caching.debug=true\n' >> "$HOME/.gradle/gradle.properties"
-      - name: Build distinct Camera Notes APK
-        run: bash .github/camera-gradle-fixture.sh fresh
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: synthetic-camera-apk
-          path: ${{ runner.temp }}/fresh-cameranotes.apk
-          retention-days: 1
-          compression-level: 0
+      - name: Restore pinned public camera inputs
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/camera.zst" https://github.com/disposabl-dev/exact-cold-tool-lab/releases/download/camera-package-inputs-lab-1/camera-gradle.zst
+          echo "682d5e0fe9460616a9b27ce0425d1826b8a6364b3ea7cccab3eae281e9ae6df7  $RUNNER_TEMP/camera.zst" | sha256sum -c -
+          zstd -dc "$RUNNER_TEMP/camera.zst" | tar -xf - -C "$HOME/.gradle"
+      - name: Build and verify signed camera APK
+        env:
+          LAB_MODE: ${{ matrix.mode }}
+        run: |
+          start=$SECONDS
+          if [[ $LAB_MODE == overlap ]]; then
+            # Warm plugins on the public SDK in isolation. The real app still uses
+            # Exact's dependency verification and its own generated Gradle graph.
+            cp -R "$EXACT/host/android" "$RUNNER_TEMP/prime-android"
+            cp "$NATIVE_APP_DIR/gradle-verification.xml" "$RUNNER_TEMP/prime-android/gradle/verification-metadata.xml"
+            (cd "$RUNNER_TEMP/prime-android" && ./gradlew --offline --daemon --no-watch-fs --dependency-verification=strict help) > "$RUNNER_TEMP/warm.log" 2>&1 & primer=$!
+            python3 - "$EXACT/scripts/agent-android.mjs" <<'PYSDK'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text(); old="env.CI || graph.env.GRADLE_USER_HOME ? ['--no-daemon'] : []"
+          assert s.count(old)==1
+          p.write_text(s.replace(old, "graph.env.GRADLE_USER_HOME ? ['--no-daemon'] : ['--daemon']"))
+          PYSDK
+          fi
+          bash .github/camera-gradle-fixture.sh fresh
+          echo "Build and verification elapsed: $((SECONDS - start))s"
+          if [[ $LAB_MODE == overlap ]]; then
+            wait "$primer" || { cat "$RUNNER_TEMP/warm.log"; exit 1; }
+            tail -6 "$RUNNER_TEMP/warm.log"
+          fi
