@@ -1,7 +1,7 @@
-name: Precompile first-party Exact iPhone packages
+name: Verify canonical iPhone catalog publisher
 on:
   push:
-    branches: [compile-first-party-ios-v1]
+    branches: [ios-catalog-canonical-source]
 permissions: {contents: read}
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
@@ -15,11 +15,10 @@ jobs:
         with: {persist-credentials: false}
       - uses: ./.github/actions/exact-setup
         with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
-      - run: bun .github/compile-ios-catalog.mjs
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: first-party-iphone-packages
-          path: ${{ runner.temp }}/catalog-output
-          compression-level: 0
-          retention-days: 3
+      - name: Compile and check the canonical package catalog
+        run: |
+          cd "$NATIVE_APP_DIR"
+          bun -e 'const p="app.json", a=await Bun.file(p).json(); a.id=a.app.id="dev.disposabl.publicseed";a.deploy.signing={key:"mobile",keys:{mobile:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}};await Bun.write(p,JSON.stringify(a))'
+          bun "$GITHUB_WORKSPACE/.github/ios-package-cache.mjs"
+          count=$(find "$CARGO_TARGET_DIR/apple-swift/ios-17.0-balanced/packages-kept" -name 'ExactPkg_*.dylib' | wc -l)
+          [[ "$count" -eq 48 ]]
