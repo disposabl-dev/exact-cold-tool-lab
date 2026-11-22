@@ -7,7 +7,6 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 
 gradle.projectsEvaluated {
-    System.err.println('CATALOG HOOK invoked properties=' + gradle.startParameter.projectProperties)
     def allow = (System.getenv('EXACT_ANDROID_CATALOG_PACKAGES') ?: '').split(',').findAll { it ==~ /[a-z0-9]+(?:-[a-z0-9]+)*/ }.toSet()
     if (!allow || System.getenv('EXACT_ANDROID_CATALOG_DISABLE') == '1') return
     def sdk = new File(System.getenv('EXACT')).canonicalFile
@@ -19,7 +18,32 @@ gradle.projectsEvaluated {
     if (!app || !release || !manifest || !work.mkdirs() && !work.isDirectory()) return
     def params = gradle.startParameter.projectProperties
     def dirs = (params.extensionDirs ?: '').split(',').findAll { it }.collect { new File(it).canonicalFile }
-    def candidates = allow.findAll { name -> dirs.contains(new File(sdk, 'packages/' + name + '/android').canonicalFile) }.sort()
+    // Bun may copy rather than symlink SDK packages. Compare every source byte,
+    // including metadata, and reject links or extra files before replacing it.
+    def tree = { File root ->
+        if (!root.isDirectory()) return null
+        def files = [:]
+        def paths = java.nio.file.Files.walk(root.toPath())
+        try {
+            def iterator = paths.iterator()
+            while (iterator.hasNext()) {
+                def path = iterator.next()
+                if (java.nio.file.Files.isSymbolicLink(path)) return null
+                if (java.nio.file.Files.isRegularFile(path)) {
+                    def relative = root.toPath().relativize(path).toString()
+                    files[relative] = MessageDigest.getInstance('SHA-256').digest(path.toFile().bytes).encodeHex().toString()
+                }
+            }
+        } finally { paths.close() }
+        return files
+    }
+    def sources = [:]
+    allow.each { name ->
+        def expected = tree(new File(sdk, 'packages/' + name + '/android'))
+        def matching = dirs.findAll { it.path.endsWith('/node_modules/@exact/' + name + '/android') && tree(it) == expected }
+        if (expected && matching.size() == 1) sources[name] = matching[0]
+    }
+    def candidates = sources.keySet().sort()
     System.err.println('CATALOG candidates=' + candidates + ' dirs=' + dirs + ' sdk=' + sdk)
     if (!candidates) return
     try {
@@ -49,7 +73,7 @@ gradle.projectsEvaluated {
         def removed = [], added = []
         try {
             selected.each { name ->
-                def source = dirs.find { it == new File(sdk, 'packages/' + name + '/android').canonicalFile }
+                def source = sources[name]
                 def original = kotlinDirs.find { it.canonicalFile == source }
                 if (!original || !kotlinDirs.remove(original)) throw new GradleException('Cannot remove catalog source')
                 removed.add(original)
