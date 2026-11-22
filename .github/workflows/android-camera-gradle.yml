@@ -7,7 +7,31 @@ env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
   EXACT_TOOLS_ORIGIN: none
 jobs:
+  seed:
+    runs-on: blacksmith-16vcpu-ubuntu-2604
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '9'}
+      - name: Run production camera cache producer
+        run: |
+          export GRADLE_USER_HOME="$HOME/.gradle" EXACT_KEYSTORE="$RUNNER_TEMP/seed-key.p12" EXACT_KEY_ALIAS=android
+          export EXACT_KEYSTORE_PASSWORD="$(openssl rand -hex 24)" EXACT_KEY_PASSWORD="$EXACT_KEYSTORE_PASSWORD"
+          export GITHUB_ENV="$RUNNER_TEMP/fake-producer-env"
+          : > "$GITHUB_ENV"
+          trap 'rm -f "$EXACT_KEYSTORE"' EXIT
+          keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$EXACT_KEYSTORE" -storepass:env EXACT_KEYSTORE_PASSWORD -keypass:env EXACT_KEY_PASSWORD -alias android -keyalg RSA -dname CN=PublicFixture -validity 2 >/dev/null 2>&1
+          bash .github/actions/exact-setup/scripts/android-camera-cache.sh
+          sha256sum "$RUNNER_TEMP/kit-out/cargo-gradle-camera.zst"
+      - uses: actions/upload-artifact@v7.0.2
+        with: {name: camera-produced, path: '${{ runner.temp }}/kit-out/cargo-gradle-camera.zst', compression-level: 0, retention-days: 1}
+      - id: digest
+        run: echo "sha=$(sha256sum "$RUNNER_TEMP/kit-out/cargo-gradle-camera.zst" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+    outputs: {sha: '${{ steps.digest.outputs.sha }}'}
   fresh:
+    needs: seed
     strategy:
       fail-fast: false
       matrix: {overlay: ['baseline', 'camera']}
@@ -20,12 +44,12 @@ jobs:
         with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '9'}
       - uses: actions/download-artifact@v8.0.2
         if: matrix.overlay == 'camera'
-        with: {name: camera-overlay, path: '${{ runner.temp }}/camera-cache', run-id: '45022491278', github-token: '${{ github.token }}'}
+        with: {name: camera-produced, path: '${{ runner.temp }}/camera-cache'}
       - name: Verify and restore public camera overlay
         if: matrix.overlay == 'camera'
-        env: {OVERLAY_SHA: '0b7d5374cae43c8475af1304f497078c3d7be243e58181d130f2bb035f25ac6c'}
+        env: {OVERLAY_SHA: '${{ needs.seed.outputs.sha }}'}
         run: |
-          echo "$OVERLAY_SHA  $RUNNER_TEMP/camera-cache/camera-overlay.zst" | sha256sum -c -
-          zstd -dc "$RUNNER_TEMP/camera-cache/camera-overlay.zst" | tar -xkf - -C "$HOME/.gradle"
+          echo "$OVERLAY_SHA  $RUNNER_TEMP/camera-cache/cargo-gradle-camera.zst" | sha256sum -c -
+          python3 .github/actions/exact-setup/scripts/android-camera-restore.py "$RUNNER_TEMP/camera-cache/cargo-gradle-camera.zst" "$HOME/.gradle"
       - name: Build distinct signed camera APK
         run: LAB_APERTURE=1 bash .github/camera-gradle-fixture.sh fresh
