@@ -20,15 +20,21 @@ asset() {
 extract() {
   local name=$1 directory=$2 file=$3
   shift 3
+  local started=$SECONDS
   asset "$name" "$file"
+  echo "PROFILE $name transfer_and_hash=$((SECONDS-started))s"
+  started=$SECONDS
   mkdir -p "$directory"
   zstd -dc "$file" | tar -xf - -C "$directory" "$@"
+  echo "PROFILE $name extract=$((SECONDS-started))s"
 }
 source_tree() {
   extract sdk.tar.zst "$EXACT" "$staging/sdk.tar.zst"
   [[ $(git -C "$EXACT" rev-parse HEAD) == "$ref" ]]
   git -C "$EXACT" reset --hard --quiet HEAD
+  local started=$SECONDS
   (cd "$EXACT" && bun install --frozen-lockfile)
+  echo "PROFILE SDK bun_install=$((SECONDS-started))s"
 }
 source_tree &
 pids=($!)
@@ -66,14 +72,18 @@ if [[ $platform == ios ]]; then
     export DEVELOPER_DIR=/Applications/Xcode_27.2.app/Contents/Developer
     echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
   fi
+  profile_hook_start=$SECONDS
   bun "$scripts/ios-baker.mjs" enable "$ios_tools/ios-baker.json"
   bash "$scripts/ios-link-kit-enable.sh"
   if [[ -f "$ios_tools/link/arms/manifest.json" ]] && ! python3 "$scripts/ios-link-arms.py" restore --kit "$ios_tools/link" --target "$cargo_target"; then
     echo 'Using the standard Apple framework build for this runner.'
   fi
+  echo "PROFILE hooks_and_arms=$((SECONDS-profile_hook_start))s"
+  profile_times_start=$SECONDS
   # Match the canonical public SDK checkout used by Cargo build scripts.
   (cd "$EXACT" && git ls-files -z | xargs -0 touch -t 202001010000)
   find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
+  echo "PROFILE SDK_mtime=$((SECONDS-profile_times_start))s"
   {
     echo "EXACT_LINK_KIT_PROOF=$scripts/ios-link-kit.py"
     echo "EXACT_LINK_KIT=$ios_tools/link"
@@ -91,11 +101,13 @@ elif [[ $platform == android ]]; then
   echo "ANDROID_BUILD_TOOLS_VERSION=37.0.0" >> "$GITHUB_ENV"
 fi
 if [[ $platform != web ]]; then
+  profile_app_start=$SECONDS
   app="$HOME/exact-native/apps/apps"
   git worktree add --quiet --detach "$HOME/exact-native" HEAD
   mkdir -p "$app/.exact"
   ln -s "$EXACT" "$app/.exact/checkout"
   (cd "$app" && bun install --frozen-lockfile)
+  echo "PROFILE app_worktree_install=$((SECONDS-profile_app_start))s"
   {
     echo "NATIVE_APP_DIR=$app"
     echo "CARGO_TARGET_DIR=$cargo_target"

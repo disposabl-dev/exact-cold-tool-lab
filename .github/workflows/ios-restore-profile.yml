@@ -1,0 +1,28 @@
+name: Profile fresh iOS restore
+on:
+  push:
+    branches: [ios-composition-device-v1]
+permissions: {contents: read}
+env:
+  EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292
+  EXACT_TOOLS_ORIGIN: none
+  EXACT_UPDATE_TRUST: production
+  EXACT_UPDATE_GENESIS: '1'
+  EXACT_BUILD_NUMBER: '1'
+jobs:
+  profile:
+    runs-on: blacksmith-12vcpu-macos-27
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/exact-setup
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+      - name: Verify and build production test app
+        shell: bash
+        run: |
+          cd "$NATIVE_APP_DIR"
+          export APP_ID=dev.disposabl.restorespeed CONVEX_ORIGIN=wss://profile.invalid
+          export PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake" EXACT_VERSION=0.1.0
+          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id=process.env.APP_ID; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
+          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios
