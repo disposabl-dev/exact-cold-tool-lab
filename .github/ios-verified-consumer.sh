@@ -19,7 +19,11 @@ python3 "$scripts/ios-cache-restore.py" "$kitout/cargo-ios.zst" "$CARGO_TARGET_D
 export EXACT_LINK_KIT="$HOME/.cache/exact/ios-link-kit/$EXACT_REF" EXACT_LINK_KIT_PROOF="$scripts/ios-link-kit.py"
 mkdir -p "$EXACT_LINK_KIT"
 zstd -dc "$kitout/ios-link-kit.zst" | tar -xf - -C "$EXACT_LINK_KIT"
-python3 "$scripts/ios-link-arms.py" restore --kit "$EXACT_LINK_KIT" --target "$CARGO_TARGET_DIR"
+if [[ -f "$EXACT_LINK_KIT/arms/manifest.json" ]]; then
+  python3 "$scripts/ios-link-arms.py" restore --kit "$EXACT_LINK_KIT" --target "$CARGO_TARGET_DIR"
+else
+  echo 'Older iOS link kit has no public arm cache; Exact will build arms normally'
+fi
 git worktree add --quiet --detach "$HOME/exact-native" HEAD
 cd "$app"
 mkdir -p .exact
