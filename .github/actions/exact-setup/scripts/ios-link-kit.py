@@ -4,7 +4,7 @@
 This is not a replacement for Exact's archive/signing checks. The caller must run
 Exact's normal packaging and validate that the receipt belongs to this source.
 """
-import argparse, hashlib, json, os, re, shutil, struct, subprocess
+import argparse, hashlib, json, os, re, shutil, struct, subprocess, tempfile
 from pathlib import Path
 
 COMPILED = ('module.rs', 'logic.rs', 'linked.rs', 'host.rs')
@@ -126,7 +126,7 @@ def runtime_grants(facts):
     if len(set(origins)) != 1: raise ValueError('WebSocket grants name different origins; use normal Exact build')
     return result
 
-def main():
+def main(composition_builder=None):
     parser=argparse.ArgumentParser(); parser.add_argument('mode', choices=['create','link']); parser.add_argument('--app', default=os.getcwd()); parser.add_argument('--kit', required=True); parser.add_argument('--receipt', required=True); parser.add_argument('--bake', required=True); parser.add_argument('--out'); parser.add_argument('--proof')
     a=parser.parse_args(); kit=Path(a.kit).resolve(); current=facts(a.receipt,a.bake,a.app)
     if a.mode == 'create':
@@ -163,7 +163,14 @@ def main():
         # The SDK command has one output, two temporary linker paths, and three payloads.
         filelist=Path(str(out)+'.inputs')
         names=sorted(n for n in record['digests'] if n.endswith('.o'))
-        filelist.write_text(' '.join(str(kit/n) for n in names))
+        compilation=None
+        if composition_builder:
+            if '14-ExactComposition.o' not in names: raise ValueError('Missing camera composition object')
+            compilation=tempfile.TemporaryDirectory(prefix='.exact-composition-',dir=scratch)
+            composition=composition_builder(kit,current,Path(compilation.name))
+            filelist.write_text(' '.join(str(composition if n=='14-ExactComposition.o' else kit/n) for n in names))
+        else:
+            filelist.write_text(' '.join(str(kit/n) for n in names))
         cmd=[]
         for x in record['commands']:
             x=x.replace('@KIT@', str(kit))
@@ -175,6 +182,10 @@ def main():
             cmd.append(x)
         subprocess.run(cmd,check=True)
         verify_sections(out, a.bake)
+        if compilation:
+            marker=os.environ.get('EXACT_SELECTIVE_PROOF')
+            if marker: Path(marker).write_text(json.dumps({'composition':digest(composition),'executable':digest(out),'archive':current['archive']}))
+            compilation.cleanup()
         print('linked:',out)
 
 if __name__=='__main__': main()

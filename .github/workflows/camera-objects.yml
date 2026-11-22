@@ -1,7 +1,7 @@
 name: Test iOS camera host reuse
 on:
   push:
-    branches: [ios-selective-composition-v1]
+    branches: [ios-camera-integration-v1]
 permissions: {contents: read}
 env:
   EXACT_REF: a55c5581c7e1a62cdee1f09367ea2909c74c7292

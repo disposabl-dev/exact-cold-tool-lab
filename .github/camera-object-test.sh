@@ -11,9 +11,9 @@ if [[ $lane == producer ]]; then
 else
   export APP_ID=dev.disposabl.independentcamera CONVEX_ORIGIN=wss://different-camera.invalid
   PUBLIC_KEY=$(bun -e "import {generateKeyPairSync} from 'node:crypto'; console.log(generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('base64'))")
-  export PUBLIC_KEY EXACT_LINK_KIT="$RUNNER_TEMP/camera-kit"
+  export PUBLIC_KEY EXACT_CAMERA_LINK_KIT="$RUNNER_TEMP/camera-kit"
   tar -xf "$RUNNER_TEMP/camera-kit.tar" -C "$RUNNER_TEMP"
-  export EXACT_LINK_KIT_PROOF="$scripts/ios-selective-link.py" EXACT_SELECTIVE_PROOF="$RUNNER_TEMP/selective-proof.json"
+  export EXACT_LINK_KIT_PROOF="$scripts/ios-camera-select.py" EXACT_SELECTIVE_PROOF="$RUNNER_TEMP/selective-proof.json"
   sed -i '' 's/Capture a moment/Independent camera capture/' app.contract
 fi
 bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id=process.env.APP_ID; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
