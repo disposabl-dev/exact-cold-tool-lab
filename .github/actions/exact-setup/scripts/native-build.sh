@@ -10,11 +10,17 @@ if [[ "$platform" == android-link || "$platform" == ios-link ]]; then
     android) file="$RUNNER_TEMP/android-artifacts/android-production.apk" ;;
     ios) file="$RUNNER_TEMP/ios-artifacts/apps.ipa" ;;
   esac
+  url=''
   if [[ "$platform" == android && "${EXACT_PUBLIC_APK:-}" == true ]]; then
-    url=$(python3 "$(dirname "$0")/release-apk.py" publish "$file")
-  elif ! bunx --bun appdrop@0.8.0 "$file" --json > "$private_dir/result.json" 2> "$private_dir/log"; then
-    echo '::error::AppDrop upload failed'; exit 1
-  else
+    if ! url=$(python3 "$(dirname "$0")/release-apk.py" publish "$file"); then
+      echo '::warning::GitHub APK publication failed. Uploading the verified installer to AppDrop.'
+      url=''
+    fi
+  fi
+  if [[ -z "$url" ]]; then
+    if ! env -u GH_TOKEN bunx --bun appdrop@0.8.0 "$file" --json > "$private_dir/result.json" 2> "$private_dir/log"; then
+      echo '::error::AppDrop upload failed'; exit 1
+    fi
     url=$(jq -er '.url | select(test("^https://(www\\.)?appdrop\\.app/d/[A-Za-z0-9]+/?$"))' "$private_dir/result.json")
   fi
   # Persist only the share link. AppDrop's management credential stays on this runner.
