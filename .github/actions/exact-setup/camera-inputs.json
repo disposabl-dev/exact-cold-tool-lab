@@ -1,0 +1,10 @@
+{
+  "camera-gradle.zst": {
+    "sha256": "682d5e0fe9460616a9b27ce0425d1826b8a6364b3ea7cccab3eae281e9ae6df7",
+    "size": 396906565
+  },
+  "camera-ios.zst": {
+    "sha256": "8fb3bc2450e35b1c01ba43ac2ce975cd20143eb36625cbabe4804871eed188a5",
+    "size": 66871689
+  }
+}

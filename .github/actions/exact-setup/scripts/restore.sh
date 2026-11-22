@@ -32,6 +32,16 @@ source_tree() {
 }
 source_tree &
 pids=($!)
+# First-install benchmark against centrally published public camera inputs.
+camera_origin=https://github.com/disposabl-dev/exact-cold-tool-lab/releases/download/camera-package-inputs-lab-1
+camera_manifest="$scripts/../camera-inputs.json"
+case "$platform" in
+  ios|android)
+    name=camera-ios.zst
+    [[ "$platform" == ios ]] || name=camera-gradle.zst
+    python3 "$scripts/fetch-input.py" "$camera_origin" "$camera_manifest" "$name" "$staging/camera.zst" & pids+=($!)
+    ;;
+esac
 bundle="exact-$ref-$platform-$RUNNER_OS-$RUNNER_ARCH-bun-$SETUP_BUN_VERSION.tar.zst"
 source_kind=release
 if [[ -f "$cache/$bundle" ]]; then source_kind=cache; fi
@@ -66,6 +76,10 @@ if [[ $platform == ios ]]; then
     export DEVELOPER_DIR=/Applications/Xcode_27.2.app/Contents/Developer
     echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
   fi
+  zstd -dc "$staging/camera.zst" | tar -xf - -C "$RUNNER_TEMP"
+  camera_kit="$RUNNER_TEMP/camera-kit"
+  zstd -dc "$camera_kit/cargo-delta.zst" | tar -xf - -C "$cargo_target"
+  tar -xf "$camera_kit/swift-packages.tar" -C "$cargo_target"
   bun "$scripts/ios-baker.mjs" enable "$ios_tools/ios-baker.json"
   bash "$scripts/ios-link-kit-enable.sh"
   if [[ -f "$ios_tools/link/arms/manifest.json" ]] && ! python3 "$scripts/ios-link-arms.py" restore --kit "$ios_tools/link" --target "$cargo_target"; then
@@ -76,10 +90,11 @@ if [[ $platform == ios ]]; then
   find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
   {
     echo "EXACT_LINK_KIT_PROOF=$scripts/ios-link-kit.py"
-    echo "EXACT_LINK_KIT=$ios_tools/link"
-    echo "EXACT_IOS_SOURCE_TIMES=$ios_tools/ios-source-times.json"
+    echo "EXACT_LINK_KIT=$camera_kit"
+    echo "EXACT_IOS_SOURCE_TIMES=$camera_kit/camera-times.json"
   } >> "$GITHUB_ENV"
 elif [[ $platform == android ]]; then
+  zstd -dc "$staging/camera.zst" | tar -xf - -C "$HOME/.gradle"
   bash "$scripts/android-fast-profile.sh"
   echo 'org.gradle.caching=true' >> "$HOME/.gradle/gradle.properties"
   if [[ ! -f "$ANDROID_HOME/ndk/27.3.13750724/source.properties" || ! -f "$ANDROID_HOME/platforms/android-37.2/source.properties" || ! -f "$ANDROID_HOME/build-tools/37.0.0/source.properties" ]]; then
