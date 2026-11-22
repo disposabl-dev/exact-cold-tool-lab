@@ -16,15 +16,11 @@ jobs:
         with: {platform: android, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
       - &configure
         name: Enable incremental compilation for the generated Android crate only
-        run: |
-          cat >> "$HOME/.cargo/config.toml" <<'CONFIG'
-          [profile.release.package.apps-android]
-          incremental = true
-          CONFIG
+        run: echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/.github/app-incremental.py" >> "$GITHUB_ENV"
       - run: bash .github/camera-gradle-fixture.sh seed
       - name: Collect optimized units from the public fixture
         run: |
-          cd "$CARGO_TARGET_DIR/aarch64-linux-android/release/incremental"
+          cd "$CARGO_TARGET_DIR/app-release-incremental"
           dirs=(apps_android-*)
           [[ ${#dirs[@]} == 1 && -d ${dirs[0]} ]]
           find "${dirs[@]}" -type f -name '*.o' | wc -l
@@ -43,18 +39,14 @@ jobs:
       - *setup
       - name: Enable incremental mode only for the reuse trial
         if: matrix.mode == 'reuse'
-        run: |
-          cat >> "$HOME/.cargo/config.toml" <<'CONFIG'
-          [profile.release.package.apps-android]
-          incremental = true
-          CONFIG
+        run: echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/.github/app-incremental.py" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v8.0.2
         if: matrix.mode == 'reuse'
         with: {name: public-rust-units, path: '${{ runner.temp }}'}
       - name: Restore only app-independent compiler work candidates
         if: matrix.mode == 'reuse'
         run: |
-          dest="$CARGO_TARGET_DIR/aarch64-linux-android/release/incremental"
+          dest="$CARGO_TARGET_DIR/app-release-incremental"
           mkdir -p "$dest"
           zstd -dc "$RUNNER_TEMP/units.zst" | tar -xf - -C "$dest"
       - name: Build distinct signed app and verify fresh receipt
