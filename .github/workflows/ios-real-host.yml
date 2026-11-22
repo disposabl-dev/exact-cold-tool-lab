@@ -15,9 +15,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: paperstack
-            repo: disposabl-dev/exact-cold-paperstack
-            commit: 0871045e29989ccedea3a3227e499053a201e89e
           - name: trail
             repo: disposabl-dev/exact-cold-trail-coach
             commit: b081d589b2e23f1b16281f32a52fc260e55fea92

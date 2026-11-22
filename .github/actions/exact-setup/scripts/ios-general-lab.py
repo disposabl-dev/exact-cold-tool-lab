@@ -31,9 +31,11 @@ elif linked==['io','modules','native_views'] and ext=={'geolocation':'@exact/geo
  kind='trail'; targets=['ExactCore','ExactKit','ExactUpdates','ExactFormaBinding','ExactHeavyLeaves','ExactNativeViews']; defines=['EXACT_LINK_IO','EXACT_LINK_MODULES','EXACT_LINK_NATIVE_VIEWS']
 else: raise ValueError('Unsupported capability graph')
 # The real Cargo receipt must name exactly one existing, byte-verified archive.
-archives=[x for x in r['products'] if x['path'].endswith('/libapps_apple.a')]
+archives=[x for x in r['products'] if x['path'].endswith('.a')]
 if len(archives)!=1 or b.digest(archives[0]['path'])!=archives[0]['sha256'] or archives[0]['sha256']!=f['archive']: raise ValueError('Fresh archive mismatch')
-archive=Path(archives[0]['path']).resolve(); cat=catalog/kind/'host-objects'
+archive=Path(archives[0]['path']).resolve()
+if not archive.is_relative_to(Path(os.environ['CARGO_TARGET_DIR']).resolve()): raise ValueError('Archive outside Cargo target')
+cat=catalog/kind/'host-objects'
 for name in targets:
  if not (cat/(name+'.o')).is_file() or not (cat/(name+'.swiftmodule')).is_dir(): raise ValueError('Missing catalog target '+name)
 out=Path(a.out).resolve()
