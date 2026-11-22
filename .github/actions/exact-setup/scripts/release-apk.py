@@ -73,12 +73,15 @@ def publish(path):
     else:
         raise ValueError("Published release has no APK")
     url = f"https://github.com/{repo}/releases/download/{tag}/{filename}"
-    if (asset["state"], asset["size"], asset["digest"], asset["browser_download_url"]) != ("uploaded", len(payload), digest, url):
+    if (asset["state"], asset["size"], asset["digest"], asset["name"]) != ("uploaded", len(payload), digest, filename):
         raise ValueError("Uploaded APK does not match the verified local APK")
     if release["draft"]:
         updated = request(f"{api}/{release['id']}", "PATCH", {"draft": False, "prerelease": True, "make_latest": "false"})
         if updated["draft"]:
             raise ValueError("Android release is still a draft")
+        asset = next(a for a in updated["assets"] if a["id"] == asset["id"])
+    if asset["browser_download_url"] != url:
+        raise ValueError("Unexpected published APK URL")
     # Exercise the recipient's anonymous URL without downloading the signed binary twice.
     probe = urllib.request.Request(url, headers={"Range": "bytes=0-3"})
     with urllib.request.urlopen(probe, timeout=30) as reply:
