@@ -32,4 +32,5 @@ kit="$HOME/.cache/exact/ios-link-kit/$SETUP_EXACT_REF"
 [[ ! -e "$capture" && ! -e "$kit" ]] || { echo 'Link kit output already exists' >&2; exit 1; }
 python3 "$script_dir/ios-link-kit-capture.py" --manifest "$manifest" --receipt "$receipt" --bake "$bake" --archive "$archive" --out "$capture"
 python3 "$script_dir/ios-link-kit.py" create --kit "$kit" --proof "$capture" --receipt "$receipt" --bake "$bake" --app "$app"
+python3 "$script_dir/ios-link-arms.py" capture --kit "$kit" --target "$target"
 echo "Public iOS link kit created at $kit"

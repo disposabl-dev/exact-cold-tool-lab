@@ -1,7 +1,7 @@
 name: Verify iOS public compiler kit
 on:
   push:
-    branches: [ios-verified-producer]
+    branches: [ios-verified-arms]
 permissions:
   contents: write
 env:
@@ -37,7 +37,7 @@ jobs:
           cd "$RUNNER_TEMP/kit-out"
           for file in *; do shasum -a 256 "$file" > "$file.sha256"; done
           for file in *.sha256; do shasum -a 256 -c "$file"; done
-          gh release create ios-verified-v1 --target "$GITHUB_SHA" --title 'iOS verified test inputs' --notes 'Public synthetic fixture; experimental lab only.' ./*
+          gh release create ios-arms-v1 --target "$GITHUB_SHA" --title 'iOS arm-cache test inputs' --notes 'Public synthetic fixture; experimental lab only.' ./*
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
