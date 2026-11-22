@@ -28,7 +28,11 @@ def tree_digest(sdk, paths):
         raise ValueError('No SDK source inputs')
     # Untracked source can be picked up by Gradle source sets and must not be ignored.
     changed = subprocess.check_output(['git', '-C', str(sdk), 'status', '--porcelain', '--untracked-files=all', '--', *paths])
-    if changed:
+    # Exact temporarily places the consuming app's strict verification file
+    # here during Gradle. It is not a compiler input and is checked by Gradle.
+    changes = changed.splitlines()
+    allowed = b'?? host/android/gradle/verification-metadata.xml'
+    if any(line != allowed for line in changes):
         raise ValueError('SDK inputs differ from the pinned checkout')
     h = hashlib.sha256()
     for name in sorted(files):
