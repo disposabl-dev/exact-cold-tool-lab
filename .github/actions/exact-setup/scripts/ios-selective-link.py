@@ -221,6 +221,8 @@ def main():
             cmd.append(x)
         subprocess.run(cmd,check=True)
         verify_sections(out, a.bake)
+        marker=os.environ.get('EXACT_SELECTIVE_PROOF')
+        if marker: Path(marker).write_text(json.dumps({'composition':digest(composition),'executable':digest(out),'archive':current['archive']}))
         compilation.cleanup()
         print('linked:',out)
 
