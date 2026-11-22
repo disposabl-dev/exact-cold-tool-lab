@@ -54,6 +54,11 @@ jobs:
             case "$name" in ExactComposition.o|ExactLaunchParts.o) continue;; esac
             cp "$file" "$RUNNER_TEMP/host-objects/$name"
           done
+          for dir in "$product"/Exact*.swiftmodule; do
+            name=$(basename "$dir")
+            case "$name" in ExactComposition.swiftmodule|ExactIOS.swiftmodule|ExactLaunchParts.swiftmodule) continue;; esac
+            cp -R "$dir" "$RUNNER_TEMP/host-objects/$name"
+          done
           shasum -a 256 "$RUNNER_TEMP"/host-objects/*.o
           tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/host-objects.tar" host-objects
       - uses: actions/upload-artifact@v7.0.2
