@@ -1,0 +1,37 @@
+name: Inspect pinned tools already present on an untouched Blacksmith Linux runner
+on: {push: {branches: [linux-image-coverage]}}
+permissions: {contents: read}
+jobs:
+  coverage:
+    runs-on: blacksmith-16vcpu-ubuntu-2604
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with: {persist-credentials: false}
+      - run: |
+          rustup toolchain list -v
+          rustc -vV
+          rustup target list --installed
+          echo "Android NDKs"; ls "$ANDROID_HOME/ndk"
+          echo "Gradle user caches"; du -sh "$HOME/.gradle/"* 2>/dev/null || true
+          echo "Cargo user caches"; du -sh "$HOME/.cargo/registry/"* 2>/dev/null || true
+      - name: Inspect a verified public Android tool image
+        run: |
+          release=https://github.com/disposabl-dev/exact-cold-tool-lab/releases/download/android-mounted-tools-lab-v1
+          cd "$RUNNER_TEMP"
+          curl -fsSL "$release/index.json" -o index.json
+          echo '16eb8f2b003aee8ad9dd140ad8c0bf8059ad4b1f192fa374b59bd32f531ca703  index.json' | sha256sum -c -
+          python3 "$GITHUB_WORKSPACE/.github/chunked-snapshot.py" fetch android.squashfs index.json --url "$release/android.squashfs"
+          mkdir shared
+          sudo mount -o loop,ro,nodev,nosuid android.squashfs shared
+          echo "Top tree sizes"
+          du -hx --max-depth=2 shared | sort -hr | head -35 || true
+          echo "Bundled toolchain"
+          for tool in shared/home/.rustup/toolchains/*; do
+            name=${tool##*/}
+            "$tool/bin/rustc" -vV
+            if test -e "$HOME/.rustup/toolchains/$name/bin/rustc"; then
+              echo "Runner already has $name"
+              sha256sum "$tool/bin/rustc" "$HOME/.rustup/toolchains/$name/bin/rustc"
+            fi
+            du -hx --max-depth=2 "$tool/lib/rustlib" | sort -hr | head -20 || true
+          done
