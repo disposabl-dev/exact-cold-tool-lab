@@ -207,7 +207,8 @@ def main():
         filelist=Path(str(out)+'.inputs')
         names=sorted(n for n in record['digests'] if n.endswith('.o'))
         if '14-ExactComposition.o' not in names: raise ValueError('Missing camera composition object')
-        composition=compile_composition(kit,current,scratch)
+        compilation=tempfile.TemporaryDirectory(prefix='.exact-composition-',dir=scratch)
+        composition=compile_composition(kit,current,Path(compilation.name))
         filelist.write_text(' '.join(str(composition if n=='14-ExactComposition.o' else kit/n) for n in names))
         cmd=[]
         for x in record['commands']:
@@ -220,6 +221,7 @@ def main():
             cmd.append(x)
         subprocess.run(cmd,check=True)
         verify_sections(out, a.bake)
+        compilation.cleanup()
         print('linked:',out)
 
 if __name__=='__main__': main()
