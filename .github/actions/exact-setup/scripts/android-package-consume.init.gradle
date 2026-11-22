@@ -1,0 +1,65 @@
+// Optional catalog path. All guards fail closed to Exact's original sources.
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+
+gradle.projectsEvaluated {
+    def allow = (System.getenv('EXACT_ANDROID_CATALOG_PACKAGES') ?: '').split(',').findAll { it ==~ /[a-z0-9]+(?:-[a-z0-9]+)*/ }.toSet()
+    if (!allow || System.getenv('EXACT_ANDROID_CATALOG_DISABLE') == '1') return
+    def sdk = new File(System.getenv('EXACT')).canonicalFile
+    def scripts = new File(System.getenv('EXACT_ANDROID_CATALOG_SCRIPTS'))
+    def release = System.getenv('EXACT_ANDROID_CATALOG_RELEASE')
+    def manifest = System.getenv('EXACT_ANDROID_CATALOG_MANIFEST')
+    def work = new File(System.getenv('EXACT_ANDROID_CATALOG_WORK'))
+    def app = gradle.rootProject.findProject(':app')
+    if (!app || !release || !manifest || !work.mkdirs() && !work.isDirectory()) return
+    def params = gradle.startParameter.projectProperties
+    def dirs = (params.extensionDirs ?: '').split(',').findAll { it }.collect { new File(it).canonicalFile }
+    def candidates = allow.findAll { name -> dirs.contains(new File(sdk, 'packages/' + name + '/android').canonicalFile) }.sort()
+    if (!candidates) return
+    try {
+        def run = { List args ->
+            def p = new ProcessBuilder(args.collect { it.toString() }).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+            def result = p.inputStream.getText('UTF-8')
+            if (p.waitFor() != 0) throw new GradleException('Catalog guard process failed')
+            return result
+        }
+        run(['python3', new File(scripts, 'android-package-fetch.py'), release, manifest, work, scripts] + candidates)
+        // Resolve a copy so the real app's configurations stay mutable. Strict
+        // verification and the app's lock remain in force on the normal build.
+        def shadow = app.configurations.getByName('releaseCompileClasspath').copyRecursive()
+        def view = shadow.incoming.artifactView {
+            componentFilter { it instanceof ModuleComponentIdentifier }
+            attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, 'android-classes-jar')
+        }
+        def graph = view.artifacts.artifacts.collect { artifact ->
+            def id = artifact.id.componentIdentifier
+            def sha = MessageDigest.getInstance('SHA-256').digest(artifact.file.bytes).encodeHex().toString()
+            [group:id.group, name:id.module, version:id.version, sha256:sha]
+        }
+        def graphFile = new File(work, 'app-graph.json')
+        graphFile.text = JsonOutput.toJson(graph)
+        def selected = new JsonSlurper().parseText(run(['python3', new File(scripts, 'android-package-catalog.py'), 'select', work, graphFile] + candidates))
+        def kotlinDirs = app.android.sourceSets.getByName('main').kotlin.directories
+        def removed = [], added = []
+        try {
+            selected.each { name ->
+                def source = dirs.find { it == new File(sdk, 'packages/' + name + '/android').canonicalFile }
+                def original = kotlinDirs.find { it.canonicalFile == source }
+                if (!original || !kotlinDirs.remove(original)) throw new GradleException('Cannot remove catalog source')
+                removed.add(original)
+                added.add(app.dependencies.add('implementation', app.files(new File(work, name + '.jar'))))
+            }
+            println('Exact Android catalog selected: ' + (selected ?: 'none; sources retained'))
+        } catch (Exception error) {
+            removed.each { kotlinDirs.add(it) }
+            added.each { app.configurations.getByName('implementation').dependencies.remove(it) }
+            throw error
+        }
+    } catch (Exception error) {
+        println('Exact Android catalog unavailable; using original Kotlin sources (' + error.class.simpleName + ')')
+    }
+}
