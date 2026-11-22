@@ -8,11 +8,18 @@ export EXACT_VERSION=0.1.0
 if [[ $lane == producer ]]; then
   export APP_ID=dev.disposabl.publicseed PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= CONVEX_ORIGIN=wss://public-seed.invalid
   unset EXACT_LINK_KIT_PROOF EXACT_LINK_KIT
+  export IOS_REAL_CARGO=$(command -v cargo) IOS_EVIDENCE_PUBLIC_SEED=1 IOS_EVIDENCE_DIR="$RUNNER_TEMP/cargo-evidence"
+  mkdir -p "$RUNNER_TEMP/capture-cargo" "$IOS_EVIDENCE_DIR"
+  ln -s "$scripts/ios-cargo-capture.sh" "$RUNNER_TEMP/capture-cargo/cargo"
+  export PATH="$RUNNER_TEMP/capture-cargo:$PATH"
+  python3 "$GITHUB_WORKSPACE/.github/camera-cache-delta.py" record "$CARGO_TARGET_DIR" "$RUNNER_TEMP/baseline.json"
 else
   export APP_ID=dev.disposabl.independentcamera CONVEX_ORIGIN=wss://different-camera.invalid
   PUBLIC_KEY=$(bun -e "import {generateKeyPairSync} from 'node:crypto'; console.log(generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('base64'))")
   export PUBLIC_KEY EXACT_LINK_KIT="$RUNNER_TEMP/camera-kit"
   tar -xf "$RUNNER_TEMP/camera-kit.tar" -C "$RUNNER_TEMP"
+  zstd -dc "$EXACT_LINK_KIT/cargo-delta.zst" | tar -xf - -C "$CARGO_TARGET_DIR"
+  export EXACT_IOS_SOURCE_TIMES="$EXACT_LINK_KIT/camera-times.json"
   sed -i '' 's/Capture a moment/Independent camera capture/' app.contract
 fi
 bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id=process.env.APP_ID; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
@@ -31,6 +38,13 @@ PY
 if [[ $lane == producer ]]; then
   bash "$scripts/ios-link-kit-publish.sh"
   cp -R "$HOME/.cache/exact/ios-link-kit/$EXACT_REF" "$RUNNER_TEMP/camera-kit"
+  kit="$RUNNER_TEMP/camera-kit"
+  bun "$scripts/ios-source-times.mjs" record "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" "$PWD" "$kit/camera-times.json"
+  captures=("$IOS_EVIDENCE_DIR"/cargo-ios.*)
+  [[ ${#captures[@]} == 1 ]]
+  export IOS_CAPTURE_BASELINE="$RUNNER_TEMP/baseline.json"
+  bash "$scripts/ios-cache-archive.sh" "$CARGO_TARGET_DIR" "$kit/cargo-delta.zst" "${captures[0]}"
+  du -h "$kit/cargo-delta.zst"
   tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/camera-kit.tar" camera-kit
 else
   grep -F 'new production executable linked from verified inputs' "$RUNNER_TEMP/$lane-build.log"

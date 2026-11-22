@@ -82,6 +82,12 @@ if compiled.is_dir() and not compiled.is_symlink():
             path = Path(base) / filename
             if filename in ('.complete', 'module.rs', 'logic.rs', 'linked.rs', 'host.rs') and path.is_file() and not path.is_symlink():
                 files.append(os.fsencode(path.relative_to(root)))
+# Lab delta, constrained to the publisher's pre-existing output allowlist.
+baseline=json.loads(Path(os.environ['IOS_CAPTURE_BASELINE']).read_text())
+def is_changed(name):
+    st=(root/os.fsdecode(name)).stat()
+    return baseline.get(os.fsdecode(name)) != [st.st_size, st.st_mtime_ns]
+files=[name for name in files if is_changed(name)]
 if not files:
     raise SystemExit('No compiled Rust cache files found')
 with open(os.environ['LIST'], 'wb') as out:
