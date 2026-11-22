@@ -37,6 +37,17 @@ jobs:
         env:
           CARGO_LOG: cargo::core::compiler::fingerprint=info
         run: |
+          mkdir -p "$RUNNER_TEMP/trace-bin"
+          export REAL_CARGO=$(command -v cargo)
+          cat > "$RUNNER_TEMP/trace-bin/cargo" <<'SH'
+          #!/bin/bash
+          case " $* " in
+            *" rustc "*|*" build "*) CARGO_LOG=cargo::core::compiler::fingerprint=trace "$REAL_CARGO" -vv "$@" 2> >(tee -a "$RUNNER_TEMP/native-fingerprints" >&2); exit $?;;
+            *) exec "$REAL_CARGO" "$@";;
+          esac
+          SH
+          chmod +x "$RUNNER_TEMP/trace-bin/cargo"
+          export PATH="$RUNNER_TEMP/trace-bin:$PATH"
           cd "$NATIVE_APP_DIR"
           export EXACT_KEYSTORE="$RUNNER_TEMP/unpublished.p12" EXACT_KEY_ALIAS=android EXACT_KEYSTORE_PASSWORD=standalone-test EXACT_KEY_PASSWORD=standalone-test
           keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$EXACT_KEYSTORE" -storepass:env EXACT_KEYSTORE_PASSWORD -keypass:env EXACT_KEY_PASSWORD -alias android -keyalg RSA -dname CN=Disposable -validity 2
@@ -46,3 +57,16 @@ jobs:
           bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure android
           unset EXACT_UPDATE_SEED
           bun exact.mjs android --release --no-install --json > "$RUNNER_TEMP/result.json"
+      - name: Identify the first invalidated dependencies
+        if: always()
+        run: |
+          if [[ -s "$RUNNER_TEMP/native-fingerprints" ]]; then
+            grep -iE 'dirty|stale|wgpu[-_]hal|exact[-_]logic' "$RUNNER_TEMP/native-fingerprints" | grep -iE 'dirty|stale|changed' | tail -100 || true
+            gzip -1 "$RUNNER_TEMP/native-fingerprints"
+          fi
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: compiler-fingerprint-trace
+          path: ${{ runner.temp }}/native-fingerprints.gz
+          retention-days: 1
