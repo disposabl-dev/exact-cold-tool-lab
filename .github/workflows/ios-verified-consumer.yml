@@ -1,7 +1,7 @@
 name: Verify iOS kit fresh runner consumer
 on:
   push:
-    branches: [ios-verified-consumer]
+    branches: [ios-cargo-trace-01]
 permissions:
   contents: read
 env:
@@ -36,6 +36,8 @@ jobs:
           name: ios-verified-consumer-evidence
           path: |
             ${{ runner.temp }}/consumer-build.log
+            ${{ runner.temp }}/cargo-fingerprint.raw
+            ${{ runner.temp }}/cargo-env.log
             ${{ runner.temp }}/consumer.ipa
             ${{ runner.temp }}/consumer.receipt.json
           retention-days: 1

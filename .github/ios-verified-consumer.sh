@@ -38,6 +38,19 @@ bun -e '
 APP_DIR="$app" bun -e 'const {resolveApp}=await import(`${process.env.EXACT}/scripts/app.mjs`); resolveApp(process.env.APP_DIR).rust();'
 cargo fetch --locked --manifest-path "$app/.exact/shells/Cargo.toml"
 IOS_RESTORE_CARGO_SOURCE_MTIMES=1 bun "$scripts/ios-source-times.mjs" apply "$kitout/ios-source-times.json" "$app"
+# Capture Cargo's raw fingerprint diagnostics before Exact's progress filter.
+mkdir -p "$RUNNER_TEMP/cargo-trace-bin"
+export IOS_TRACE_REAL_CARGO=$(command -v cargo)
+cat > "$RUNNER_TEMP/cargo-trace-bin/cargo" <<'TRACE'
+#!/usr/bin/env bash
+set -o pipefail
+export CARGO_LOG=cargo::core::compiler::fingerprint=info
+printf 'command: cargo %s\n' "$*" >> "$RUNNER_TEMP/cargo-fingerprint.raw"
+"$IOS_TRACE_REAL_CARGO" "$@" 2> >(tee -a "$RUNNER_TEMP/cargo-fingerprint.raw" >&2)
+TRACE
+chmod +x "$RUNNER_TEMP/cargo-trace-bin/cargo"
+export PATH="$RUNNER_TEMP/cargo-trace-bin:$PATH"
+{ rustc -vV; cargo -V; xcodebuild -version; env | LC_ALL=C sort | grep -E '^(CARGO_|RUST|EXACT_|MACOSX_|IPHONEOS_|DEVELOPER_DIR|HOME=|TMPDIR=)' | sed '/TOKEN/d;/SECRET/d;/KEYSTORE/d;/PASSWORD/d'; } > "$RUNNER_TEMP/cargo-env.log"
 start=$(date +%s)
 bun exact.mjs ios --device --release --unsigned --archive "$RUNNER_TEMP/consumer.ipa" --json 2>&1 | tee "$RUNNER_TEMP/consumer-build.log"
 echo "consumer build wall: $(($(date +%s)-start))s" | tee -a "$GITHUB_STEP_SUMMARY"
