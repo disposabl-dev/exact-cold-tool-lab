@@ -7,6 +7,7 @@ ref=$SETUP_EXACT_REF
 tag="v${SETUP_BUNDLE_VERSION}-exact-${ref}-bun-$SETUP_BUN_VERSION"
 release="https://github.com/disposabl-dev/disposabl-exact/releases/download/$tag"
 manifest="$scripts/../inputs.json"
+if [[ $SETUP_BUNDLE_VERSION -ge 9 ]]; then manifest="$scripts/../inputs-v${SETUP_BUNDLE_VERSION}.json"; fi
 staging=$(mktemp -d "$RUNNER_TEMP/exact-inputs.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 publisher=".cache/exact/publisher/$ref"
@@ -20,21 +21,15 @@ asset() {
 extract() {
   local name=$1 directory=$2 file=$3
   shift 3
-  local started=$SECONDS
-  asset "$name" "$file"
-  echo "PROFILE $name transfer_and_hash=$((SECONDS-started))s"
-  started=$SECONDS
-  mkdir -p "$directory"
+  asset "$name" "$file" || return 1
+  mkdir -p "$directory" || return 1
   zstd -dc "$file" | tar -xf - -C "$directory" "$@"
-  echo "PROFILE $name extract=$((SECONDS-started))s"
 }
 source_tree() {
   extract sdk.tar.zst "$EXACT" "$staging/sdk.tar.zst"
   [[ $(git -C "$EXACT" rev-parse HEAD) == "$ref" ]]
   git -C "$EXACT" reset --hard --quiet HEAD
-  local started=$SECONDS
   (cd "$EXACT" && bun install --frozen-lockfile)
-  echo "PROFILE SDK bun_install=$((SECONDS-started))s"
 }
 source_tree &
 pids=($!)
@@ -54,6 +49,13 @@ case "$platform" in
     mkdir -p "$ios_tools"
     extract cargo-ios.zst "$cargo_target" "$staging/cargo.zst" & pids+=($!)
     extract ios-link-kit.zst "$ios_tools/link" "$staging/link.zst" & pids+=($!)
+    if python3 - "$manifest" <<'PY_HOST'
+import json,sys
+raise SystemExit(0 if 'ios-host-catalog.zst' in json.load(open(sys.argv[1])) else 1)
+PY_HOST
+    then
+      (extract ios-host-catalog.zst "$ios_tools/host-catalog" "$staging/host-catalog.zst" || { rm -rf "$ios_tools/host-catalog"; echo 'Host catalog unavailable; using stock or normal build.'; }) & pids+=($!)
+    fi
     for file in ios-source-times.json ios-baker.json; do
       asset "$file" "$ios_tools/$file" & pids+=($!)
     done
@@ -72,24 +74,41 @@ if [[ $platform == ios ]]; then
     export DEVELOPER_DIR=/Applications/Xcode_27.2.app/Contents/Developer
     echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
   fi
-  profile_hook_start=$SECONDS
   bun "$scripts/ios-baker.mjs" enable "$ios_tools/ios-baker.json"
   bash "$scripts/ios-link-kit-enable.sh"
   if [[ -f "$ios_tools/link/arms/manifest.json" ]] && ! python3 "$scripts/ios-link-arms.py" restore --kit "$ios_tools/link" --target "$cargo_target"; then
     echo 'Using the standard Apple framework build for this runner.'
   fi
-  echo "PROFILE hooks_and_arms=$((SECONDS-profile_hook_start))s"
-  profile_times_start=$SECONDS
+  # Exact chooses entries by the current package sources, dependencies and compiler flags.
+  if [[ -d "$ios_tools/link/packages-kept" ]]; then
+    package_root="$cargo_target/apple-swift/ios-17.0-balanced"
+    mkdir -p "$package_root"
+    cp -R "$ios_tools/link/packages-kept" "$package_root/"
+  fi
   # Match the canonical public SDK checkout used by Cargo build scripts.
   (cd "$EXACT" && git ls-files -z | xargs -0 touch -t 202001010000)
   find "$EXACT" -type d -not -path '*/.git*' -exec touch -t 202001010000 {} +
-  echo "PROFILE SDK_mtime=$((SECONDS-profile_times_start))s"
   {
-    echo "EXACT_LINK_KIT_PROOF=$scripts/ios-link-kit.py"
+    if [[ -f "$ios_tools/host-catalog/manifest.json" ]]; then
+      echo "EXACT_HOST_CATALOG=$ios_tools/host-catalog"
+      echo "EXACT_LINK_KIT_PROOF=$scripts/ios-host-select.py"
+    else
+      echo "EXACT_LINK_KIT_PROOF=$scripts/ios-link-kit.py"
+    fi
     echo "EXACT_LINK_KIT=$ios_tools/link"
     echo "EXACT_IOS_SOURCE_TIMES=$ios_tools/ios-source-times.json"
   } >> "$GITHUB_ENV"
 elif [[ $platform == android ]]; then
+  # Resolve the pinned host plugins while Exact bakes and compiles Rust. Keep
+  # Gradle's project state separate from the real app and its dependency locks.
+  (
+    prime="$RUNNER_TEMP/gradle-prime"
+    cp -R "$EXACT/host/android" "$prime"
+    metadata="$GITHUB_WORKSPACE/apps/apps/gradle-verification.xml"
+    if [[ -f "$metadata" ]]; then cp "$metadata" "$prime/gradle/verification-metadata.xml"; fi
+    cd "$prime"
+    exec ./gradlew --offline --daemon --no-watch-fs --dependency-verification=strict help
+  ) > "$RUNNER_TEMP/gradle-prime.log" 2>&1 < /dev/null &
   bash "$scripts/android-fast-profile.sh"
   echo 'org.gradle.caching=true' >> "$HOME/.gradle/gradle.properties"
   if [[ ! -f "$ANDROID_HOME/ndk/27.3.13750724/source.properties" || ! -f "$ANDROID_HOME/platforms/android-37.2/source.properties" || ! -f "$ANDROID_HOME/build-tools/37.0.0/source.properties" ]]; then
@@ -101,13 +120,11 @@ elif [[ $platform == android ]]; then
   echo "ANDROID_BUILD_TOOLS_VERSION=37.0.0" >> "$GITHUB_ENV"
 fi
 if [[ $platform != web ]]; then
-  profile_app_start=$SECONDS
   app="$HOME/exact-native/apps/apps"
   git worktree add --quiet --detach "$HOME/exact-native" HEAD
   mkdir -p "$app/.exact"
   ln -s "$EXACT" "$app/.exact/checkout"
   (cd "$app" && bun install --frozen-lockfile)
-  echo "PROFILE app_worktree_install=$((SECONDS-profile_app_start))s"
   {
     echo "NATIVE_APP_DIR=$app"
     echo "CARGO_TARGET_DIR=$cargo_target"

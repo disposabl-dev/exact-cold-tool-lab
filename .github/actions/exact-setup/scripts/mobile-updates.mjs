@@ -1,7 +1,7 @@
 // GitHub Actions runs this from the Exact app directory.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, createPrivateKey, createPublicKey, hkdfSync, sign } from 'node:crypto';
-import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -41,7 +41,9 @@ if (command === 'plan' && !platform) {
     })));
     const failed = results.filter(result => result.status === 'rejected');
     if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'Mobile update delivery failed');
-    appendFileSync(GITHUB_OUTPUT, `matrix=${JSON.stringify(results.map(result => result.value).filter(Boolean))}\n`);
+    const native = results.map(result => result.value).filter(Boolean);
+    const isPublicAndroid = item => process.env.PUBLIC_REPO === 'true' && item.platform === 'android';
+    appendFileSync(GITHUB_OUTPUT, `matrix=${JSON.stringify(native.filter(item => !isPublicAndroid(item)))}\npublic_android=${JSON.stringify(native.filter(isPublicAndroid))}\n`);
   } finally {
     if (added) execFileSync('git', ['worktree', 'remove', '--force', worktree], { env: cleanEnv, stdio: 'inherit' });
     rmSync(tmp, { recursive: true, force: true });
@@ -145,7 +147,12 @@ if (command === 'deliver') {
 if (!/^base-[1-9][0-9]*$/.test(channel || '')) throw Error('Missing native update channel');
 manifest.deploy.channel = channel;
 manifest.deploy.channels = { [channel]: 'appdrop' };
-writeFileSync('app.json', JSON.stringify(manifest, null, 2) + '\n');
+const configured = JSON.stringify(manifest, null, 2) + '\n';
+if (command === 'seed' && env.EXACT_EARLY_RECEIPT) {
+  if (readFileSync('app.json', 'utf8') !== configured) throw Error('Native build manifest changed during publication');
+} else {
+  writeFileSync('app.json', configured);
+}
 const installScope = `${origin.describe()}/${channel}`;
 if (command === 'configure') {
   appendFileSync(env.GITHUB_ENV, `EXACT_INSTALL_SCOPE=${installScope}\n`);
@@ -153,6 +160,36 @@ if (command === 'configure') {
   process.exit(0);
 }
 const app = resolveApp(process.cwd());
+// On first installs, stage blobs while native packaging runs. Release history and
+// the signed head stay private until the provider confirms the verified installer.
+if (command === 'seed' && env.EXACT_EARLY_RECEIPT) {
+  const receiptFile = env.EXACT_EARLY_RECEIPT;
+  const readyFile = resolve(env.RUNNER_TEMP, `install-${platform}.ready`);
+  const receiptDigest = () => createHash('sha256').update(readFileSync(receiptFile)).digest('hex');
+  const expectedReceipt = receiptDigest();
+  const head = origin.head.bind(origin);
+  const put = origin.put.bind(origin);
+  const seen = new Map();
+  origin.head = async stream => {
+    const result = await head(stream);
+    seen.set(`${stream.channel}/${stream.compatibilityId}`, result?.sha256 ?? null);
+    return result;
+  };
+  origin.put = async (path, bytes, options) => {
+    if (path.startsWith('.exact/blobs/')) return put(path, bytes, options);
+    const match = /^\.exact\/([^/]+)\/([^/]+)\/releases\/[^/]+\.json$/.exec(path);
+    if (!match) throw Error('Unexpected publication path during native packaging');
+    while (!existsSync(readyFile)) await new Promise(done => setTimeout(done, 50));
+    if (receiptDigest() !== expectedReceipt) throw Error('Native package used a newer build receipt');
+    const [, channel, compatibilityId] = match;
+    const current = await head({ channel, compatibilityId });
+    if (!seen.has(`${channel}/${compatibilityId}`) ||
+        (current?.sha256 ?? null) !== seen.get(`${channel}/${compatibilityId}`)) {
+      throw Error('Update stream changed during native packaging');
+    }
+    return put(path, bytes, options);
+  };
+}
 const builds = command === 'seed' ? readBuilds(app).filter(b => b.trust === 'production' && b.compat.inputs.platform === platform) : [];
 if (command === 'seed' && !builds.length) throw Error('Missing production build receipt for ' + platform);
 const found = await streams(origin, app, channel, { platforms: [platform], builds });
@@ -224,7 +261,10 @@ if (!compatible.length) {
     let saved;
     try { saved = JSON.parse(readFileSync(resolve(env.RUNNER_TEMP, `installer-${platform}.json`), 'utf8')); }
     catch { /* Older deployments may have no saved installer. */ }
-    if (saved?.scope === installScope && /^https:\/\/(?:www\.)?appdrop\.app\/d\/[A-Za-z0-9]+\/?$/.test(saved.url)) {
+    const publicApk = platform === 'android' && env.PUBLIC_REPO === 'true' &&
+      typeof saved?.url === 'string' && saved.url.startsWith(`https://github.com/${GITHUB_REPOSITORY}/releases/download/`) &&
+      /^exact-android-[1-9][0-9]*-[1-9][0-9]*\/android-production\.apk$/.test(saved.url.slice(`https://github.com/${GITHUB_REPOSITORY}/releases/download/`.length));
+    if (saved?.scope === installScope && (publicApk || /^https:\/\/(?:www\.)?appdrop\.app\/d\/[A-Za-z0-9]+\/?$/.test(saved.url))) {
       const label = platform === 'ios' ? 'iPhone' : 'Android';
       appendFileSync(env.GITHUB_STEP_SUMMARY, `[Install on ${label}](${saved.url})\n`);
     }

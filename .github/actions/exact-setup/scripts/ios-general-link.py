@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -122,10 +123,19 @@ def prepare_graph(package, manifest):
 
 def check_sources(sdk, app, receipt, modules):
     # The catalog and runtime recipe use only source owned by the immutable SDK.
-    roots = ['host/apple/Package.swift', *['host/apple/Sources/' + n for n in
+    roots = ['host/apple/Package.swift', 'host/apple/include', *['host/apple/Sources/' + n for n in
              [*modules, 'CExact', 'CExactLaunch', 'ExactLaunchParts', 'ExactComposition', 'ExactIOS']]]
     require(not output(['git', '-C', str(sdk), 'status', '--porcelain', '--untracked-files=all', '--', *roots]),
             'SDK host sources changed')
+    # SwiftPM picks up source files even if Git ignores them. The three
+    # rebuilt SDK targets have no generated files, so their trees must match.
+    for name in ('ExactLaunchParts', 'ExactComposition', 'ExactIOS'):
+        rel = 'host/apple/Sources/' + name
+        tracked = set(output(['git', '-C', str(sdk), 'ls-tree', '-r', '--name-only', 'HEAD', '--', rel]).splitlines())
+        root = sdk / rel
+        actual = {p.relative_to(sdk).as_posix() for p in root.rglob('*') if p.is_file() or p.is_symlink()}
+        require(actual == tracked and not any((sdk / n).is_symlink() for n in actual),
+                'rebuilt SDK source inventory changed')
     for item in kit_tools.load(receipt)['binary']['sourceInputs']['files']:
         root = {'exact': sdk, 'app': app}[item['root']]
         rel = Path(item['path'])
@@ -142,12 +152,16 @@ def select_objects(catalog, manifest, modules, include):
         matches = [k for k in files if k.startswith(prefix)]
         require(object_path in files and any(k.endswith('.swiftmodule') for k in matches),
                 'incomplete cached target: ' + name)
+        module_dir = include / (name + '.swiftmodule')
+        module_dir.mkdir()
         for key in [object_path, *matches]:
             path = catalog / key
             require('..' not in Path(key).parts and path.resolve().is_relative_to(catalog)
                     and kit_tools.digest(path) == files[key], 'invalid cached target: ' + name)
+            if key.startswith(prefix) and path.suffix in ('.swiftmodule', '.swiftdoc'):
+                require(key == prefix + path.name, 'unexpected Swift module layout')
+                shutil.copyfile(path, module_dir / path.name)
         objects.append(catalog / object_path)
-        (include / (name + '.swiftmodule')).symlink_to(catalog / prefix, target_is_directory=True)
     return objects
 
 
@@ -189,13 +203,20 @@ def link(args):
     package = sdk / 'host/apple'
     modules, defines = prepare_graph(package, manifest)
     check_sources(sdk, app, args.receipt, modules)
+    reused = {name: manifest['targets'][name] for name in [*modules, 'CExact', 'CExactLaunch']}
+    inventories = load_script('ios-host-sources').source_hashes(package, reused)
+    require(all(manifest['source_hashes'].get(name) == files for name, files in inventories.items()),
+            'cached SDK source or header inventory differs')
     sources = package / 'Sources'
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.exact-link-', dir=destination.parent) as tmp:
         scratch = Path(tmp)
         objects = select_objects(catalog, manifest, modules, scratch)
-        launch = next(k for k in original['digests'] if k.endswith('-CExactLaunch.o'))
-        require(kit_tools.digest(kit / launch) == original['digests'][launch], 'C launch object changed')
+        launch = scratch / 'CExactLaunch.o'
+        c_source = sources / 'CExactLaunch'
+        subprocess.run(['/usr/bin/xcrun', '--sdk', 'iphoneos', 'clang', '-target', TRIPLE, '-isysroot',
+                        toolchain[2], '-O2', '-I', str(c_source / 'include'), '-c', str(c_source / 'launch.c'),
+                        '-o', str(launch)], check=True)
         modulemap = scratch / 'CExactLaunch.modulemap'
         modulemap.write_text('module CExactLaunch { umbrella header "' + str(sources / 'CExactLaunch/include/CExactLaunch.h') + '" export * }\n')
         flags = ['/usr/bin/xcrun', '--sdk', 'iphoneos', 'swiftc', '-target', TRIPLE, '-sdk', toolchain[2],
@@ -205,7 +226,7 @@ def link(args):
             objects.append(compile_swift(name, sorted((sources / name).glob('*.swift')), flags, scratch,
                                          defines if name == 'ExactComposition' else (), main=name == 'ExactIOS'))
         response = scratch / 'objects.rsp'
-        response.write_text('\n'.join(shlex.quote(str(obj)) for obj in [kit / launch, *objects]))
+        response.write_text('\n'.join(shlex.quote(str(obj)) for obj in [launch, *objects]))
         linked = scratch / 'app'
         replacements = {'@@KIT@/link.txt': '@' + str(response), '@KIT@/ExactIOS': str(linked),
                         '@KIT@/ExactIOS.swiftmodule': str(scratch / 'ExactIOS.swiftmodule'),

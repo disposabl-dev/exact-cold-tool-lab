@@ -7,16 +7,24 @@ if [[ "$platform" == android-link || "$platform" == ios-link ]]; then
   private_dir=$(mktemp -d "$RUNNER_TEMP/appdrop.XXXXXX")
   trap 'rm -rf "$private_dir"' EXIT
   case "$platform" in
-    android) file="$RUNNER_TEMP/android-artifacts/android-production.apk"; label=Android ;;
-    ios) file="$RUNNER_TEMP/ios-artifacts/apps.ipa"; label=iPhone ;;
+    android) file="$RUNNER_TEMP/android-artifacts/android-production.apk" ;;
+    ios) file="$RUNNER_TEMP/ios-artifacts/apps.ipa" ;;
   esac
-  if ! bunx --bun appdrop@0.8.0 "$file" --json > "$private_dir/result.json" 2> "$private_dir/log"; then
-    echo '::error::AppDrop upload failed'; exit 1
+  url=''
+  if [[ "$platform" == android && "${EXACT_PUBLIC_APK:-}" == true ]]; then
+    if ! url=$(python3 "$(dirname "$0")/release-apk.py" publish "$file"); then
+      echo '::warning::GitHub APK publication failed. Uploading the verified installer to AppDrop.'
+      url=''
+    fi
   fi
-  url=$(jq -er '.url | select(test("^https://(www\\.)?appdrop\\.app/d/[A-Za-z0-9]+/?$"))' "$private_dir/result.json")
+  if [[ -z "$url" ]]; then
+    if ! env -u GH_TOKEN bunx --bun appdrop@0.8.0 "$file" --json > "$private_dir/result.json" 2> "$private_dir/log"; then
+      echo '::error::AppDrop upload failed'; exit 1
+    fi
+    url=$(jq -er '.url | select(test("^https://(www\\.)?appdrop\\.app/d/[A-Za-z0-9]+/?$"))' "$private_dir/result.json")
+  fi
   # Persist only the share link. AppDrop's management credential stays on this runner.
   jq -nc --arg url "$url" --arg scope "$EXACT_INSTALL_SCOPE" '{url:$url,scope:$scope}' > "$RUNNER_TEMP/installer-$platform.json"
-  printf '[Install on %s](%s)\n' "$label" "$url" >> "$GITHUB_STEP_SUMMARY"
   exit
 fi
 [[ "$CONVEX_ORIGIN" == wss://* ]] || { echo '::error::Invalid Convex WebSocket origin'; exit 1; }
@@ -30,7 +38,24 @@ if [[ "$platform" == ios ]]; then
       echo 'Using the normal Exact iOS build for this workspace.'
     fi
   fi
+  # This pinned SDK compiles its app archive independently of its shared SDK
+  # dependencies. Keep their original profiles and their Cargo fingerprints.
+  if [[ "${EXACT_REF:-}" == a55c5581c7e1a62cdee1f09367ea2909c74c7292 && "${EXACT_IOS_APP_CGU:-16}" == 16 && -z "${CARGO_PROFILE_BALANCED_CODEGEN_UNITS:-}" && ! -f data/Cargo.toml ]] && jq -e '.game == null' app.json >/dev/null; then
+    export EXACT_IOS_REAL_CARGO="$(command -v cargo)"
+    wrapper="$RUNNER_TEMP/ios-app-cargo"
+    mkdir -p "$wrapper"
+    scripts=$(cd "$(dirname "$0")" && pwd)
+    ln -sf "$scripts/ios-cargo-app-profile.sh" "$wrapper/cargo"
+    export PATH="$wrapper:$PATH"
+  fi
+  export EXACT_GENERAL_PROOF="$artifacts/swift-host.json"
+  rm -f "$EXACT_GENERAL_PROOF"
   bun exact.mjs ios --device --release --unsigned --archive "$artifacts/apps.ipa" --json > "$artifacts/build.json"
+  if [[ -f "$EXACT_GENERAL_PROOF" ]]; then
+    jq -r '"Reused Swift targets: " + (.targets | join(", "))' "$EXACT_GENERAL_PROOF"
+  else
+    echo "Exact completed the iOS build using the stock link kit or SwiftPM."
+  fi
   unzip -tq "$artifacts/apps.ipa" >/dev/null
   unzip -q "$artifacts/apps.ipa" -d "$RUNNER_TEMP/iphone-archive"
   apps=("$RUNNER_TEMP"/iphone-archive/Payload/*.app)

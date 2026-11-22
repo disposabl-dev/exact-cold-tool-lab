@@ -10,6 +10,13 @@ from pathlib import Path
 COMPILED = ('module.rs', 'logic.rs', 'linked.rs', 'host.rs')
 PAYLOAD = ('app.plan', 'compat.json', 'app.hbc')
 
+# Reviewed revisions of the optional SDK link hook. Each falls back to SwiftPM.
+REVIEWED_HOOKS = {
+    'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
+    'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
+    'e79fa8d9b9f228f0b36130909643b436d27abd6c1882ae3f34189b6144ed8336',
+}
+
 def digest(path):
     h = hashlib.sha256()
     with open(path, 'rb') as f:
@@ -67,13 +74,8 @@ def facts(receipt, bake, app):
     binary = r['binary']['sourceInputs']
     source = {k: binary.get(k) for k in ('version', 'files', 'inventories', 'links', 'directories', 'absent')}
     source['files'] = [dict(item) for item in source['files']]
-    # These exact, reviewed SDK hook variants differ only in scheduling the
-    # optional SwiftPM compile. No other SDK orchestration source is ignored.
-    hook_variants = {'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
-                     'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
-                     'e79fa8d9b9f228f0b36130909643b436d27abd6c1882ae3f34189b6144ed8336'}
     for item in source['files']:
-        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item['sha256'] in hook_variants:
+        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item['sha256'] in REVIEWED_HOOKS:
             item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
         if item.get('root') == 'app' and item.get('path') == '.exact/shells/Cargo.toml':
             path = Path(app)/item['path']; raw = path.read_bytes()
@@ -110,10 +112,7 @@ def runtime_grants(facts):
         origins.append(match.group(1))
         return 'net.websocket wss://<app-origin>'
     for item in result['source']['files']:
-        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item.get('sha256') in (
-            'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
-            'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
-                     'e79fa8d9b9f228f0b36130909643b436d27abd6c1882ae3f34189b6144ed8336'):
+        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item.get('sha256') in REVIEWED_HOOKS:
             item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
     compat=result['compat']
     for name in ('grantCeiling','rustGrants','javascriptGrants'):

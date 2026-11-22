@@ -43,4 +43,12 @@ captures=("$RUNNER_TEMP"/evidence/cargo-ios.*)
 bun "$scripts/ios-source-times.mjs" record "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" "$app" "$RUNNER_TEMP/kit-out/ios-source-times.json"
 bash "$scripts/ios-cache-archive.sh" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/kit-out/cargo-ios.zst" "${captures[0]}"
 bash "$scripts/ios-link-kit-publish.sh"
+# Keep public package outputs separate from app-specific linking and signing.
+bun "$scripts/ios-package-cache.mjs"
+packages="$CARGO_TARGET_DIR/apple-swift/ios-17.0-balanced/packages-kept"
+test -d "$packages"
+cp -R "$packages" "$HOME/.cache/exact/ios-link-kit/$EXACT_REF/packages-kept"
 COPYFILE_DISABLE=1 tar -C "$HOME/.cache/exact/ios-link-kit/$EXACT_REF" -cf - . | zstd -T0 -3 -o "$RUNNER_TEMP/kit-out/ios-link-kit.zst"
+
+# SDK-only Swift host catalog for production capability combinations.
+bash "$scripts/ios-host-catalog-publish.sh"

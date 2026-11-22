@@ -15,9 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: voice
-            repo: disposabl-dev/exact-cold-voice-notes
-            commit: d18136998c5cc7ae74f56e98f8a64129a4573169
+          - name: mixed-capabilities
+            repo: disposabl-dev/exact-cold-paperstack
+            commit: 0871045e29989ccedea3a3227e499053a201e89e
     runs-on: blacksmith-6vcpu-macos-27
     steps:
       - uses: actions/checkout@v7.0.1
@@ -25,18 +25,14 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with: {repository: '${{ matrix.repo }}', ref: '${{ matrix.commit }}', path: sample, persist-credentials: false}
       - uses: ./.github/actions/exact-setup
-        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
+        with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '9'}
       - uses: actions/download-artifact@v8.0.2
-        with: {name: ios-host-voice, path: '${{ runner.temp }}/catalog-voice', repository: '${{ github.repository }}', run-id: '45024537754', github-token: '${{ github.token }}'}
-      - name: Verify pinned SDK test objects
+        with: {name: ios-full-host-catalog, path: '${{ runner.temp }}/catalog', repository: '${{ github.repository }}', run-id: '45026119894', github-token: '${{ github.token }}'}
+      - name: Verify canonical SDK catalog
         run: |
-          cd "$RUNNER_TEMP/catalog-voice"
-          echo "35d2ed3d52c11ac696bfcdeb97ea166b4ff3b65ca51c8e1131827389ef3ecbfc  host-objects.tar" | shasum -a 256 -c -
-          tar -xf host-objects.tar
-          export EXACT_APPLE_LINK=all EXACT_APP_COMPOSITION=updating EXACT_LIB=apps_apple EXACT_LIB_DIR="$CARGO_TARGET_DIR/aarch64-apple-ios/balanced"
-          swift package --package-path "$EXACT/host/apple" dump-package > dump.json
-          python3 "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/ios-host-graph.py" --package-dump dump.json --target ExactComposition --output graph.json
-          python3 "$GITHUB_WORKSPACE/.github/test-voice-catalog.py"
+          cd "$RUNNER_TEMP/catalog"
+          echo 'cefa8c671f9e646b2001f396f26b59f96aeb2adbbb521b378de3dfcb9a4c102d  ios-host-catalog.zst' | shasum -a 256 -c -
+          zstd -dc ios-host-catalog.zst | tar -xf -
       - name: Selectively link fresh real app archive
         shell: bash
         run: |
@@ -44,10 +40,11 @@ jobs:
           cd "$NATIVE_APP_DIR"
           bun install --frozen-lockfile
           export EXACT_LINK_KIT_PROOF="$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/ios-general-link.py"
-          export EXACT_HOST_CATALOG="$RUNNER_TEMP/catalog-voice" EXACT_GENERAL_PROOF="$RUNNER_TEMP/general-proof.json"
+          export EXACT_HOST_CATALOG="$RUNNER_TEMP/catalog"
           export CONVEX_ORIGIN=wss://public-seed.invalid PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= EXACT_VERSION=0.1.0 EXACT_BAKE_OUTPUT="$RUNNER_TEMP/ios-artifacts/bake"
-          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
+          bun -e 'const p="app.json",a=await Bun.file(p).json(); a.id=a.app.id="dev.disposabl.mixedcatalog";a.link=["controls","drag","dialogs","tips"]; a.deploy.store.ios="A"; a.deploy.signing={key:"mobile",keys:{mobile:process.env.PUBLIC_KEY}}; a.deploy.channel="base-1"; a.deploy.channels={"base-1":"appdrop"}; await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
           bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios 2>&1 | tee "$RUNNER_TEMP/general-build.log"
-          test -s "$EXACT_GENERAL_PROOF"
-          cat "$EXACT_GENERAL_PROOF"
+          jq -e '(["ExactControls","ExactDrag","ExactDialogs","ExactTips","ExactAnimations","ExactMarkdown"] - .targets) == []' "$RUNNER_TEMP/ios-artifacts/swift-host.json"
+          grep -F "Using 16 codegen units for the iOS app crate" "$RUNNER_TEMP/general-build.log"
+          codesign --verify --deep --strict "$RUNNER_TEMP"/iphone-archive/Payload/*.app
           grep -F 'new production executable linked from verified inputs' "$RUNNER_TEMP/general-build.log"
