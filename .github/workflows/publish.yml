@@ -1,7 +1,7 @@
 name: Measure public delivery
 on:
   push:
-    branches: [public-release-transfer-228]
+    branches: [public-raw-release-transfer-228]
 permissions:
   contents: read
 env:
@@ -13,73 +13,16 @@ env:
   CONVEX_ORIGIN: wss://first-install-probe.invalid
   EXACT_BUILD_NUMBER: 1
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {platform: android, variant: baseline, runner: blacksmith-8vcpu-ubuntu-2604}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with: {persist-credentials: false}
-      - uses: ./.github/actions/exact-setup
-        with:
-          platform: ${{ matrix.platform }}
-          exact-ref: ${{ env.EXACT_REF }}
-          bundle-version: '7'
-      - name: Load pinned AppDrop and instrument the publisher
-        env:
-          MODE: ${{ matrix.variant }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/drop"
-          cd "$RUNNER_TEMP/drop"
-          npm pack --silent appdrop@0.8.0
-          tar -xzf appdrop-0.8.0.tgz
-          python3 "$GITHUB_WORKSPACE/.github/profile-publisher.py"
-      - name: Build installer
-        shell: bash
-        working-directory: ${{ env.NATIVE_APP_DIR }}
-        run: |
-          export EXACT_UPDATE_SEED=$(openssl rand -base64 32)
-          export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/${{ matrix.platform }}-artifacts/bake"
-          if [[ '${{ matrix.platform }}' == android ]]; then
-            pw=$(openssl rand -hex 16)
-            export PROBE_PASS=$pw
-            keytool -genkeypair -alias android -keystore "$RUNNER_TEMP/probe.p12" -storetype pkcs12 -storepass:env PROBE_PASS -keypass:env PROBE_PASS -dname 'CN=Isolated runner test' -keyalg RSA -keysize 2048 -validity 1000 >/dev/null 2>&1
-            export ANDROID_APK_SIGNING=$(jq -nc --arg pw "$pw" --arg ks "$(base64 -w0 "$RUNNER_TEMP/probe.p12")" '{password:$pw,keystore:$ks}')
-          fi
-          bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure '${{ matrix.platform }}'
-          export EXACT_VERSION=0.1.0
-          bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" '${{ matrix.platform }}'
-
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: signed-lab-apk
-          path: ${{ runner.temp }}/android-artifacts/android-production.apk
-          compression-level: 0
-          retention-days: 1
   release:
-    needs: build
     runs-on: blacksmith-8vcpu-ubuntu-2604
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: signed-lab-apk
-          path: bundles
-
       - uses: actions/checkout@v7.0.1
         with:
           path: lab
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.5
-      - name: Compare two public uploads and redownload anonymously
-        working-directory: bundles
+      - name: Prepare and measure direct release upload
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: bash ../lab/.github/compare-release.sh
+        run: python3 lab/.github/direct-release.py
