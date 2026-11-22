@@ -104,10 +104,13 @@ def runtime_grants(facts):
     def normalize(value):
         if value is None or value == '': return value
         if not isinstance(value,str): raise ValueError('Unexpected grant type; use normal Exact build')
-        match=pattern.fullmatch(value)
-        if not match: raise ValueError('Only one wss WebSocket grant is eligible; use normal Exact build')
+        lines=value.split('\n')
+        sockets=[(i,pattern.fullmatch(line)) for i,line in enumerate(lines) if line.startswith('net.websocket ')]
+        if len(sockets)!=1 or not sockets[0][1]: raise ValueError('Expected exactly one ordinary WSS grant')
+        index,match=sockets[0]
         origins.append(match.group(1))
-        return 'net.websocket wss://<app-origin>'
+        lines[index]='net.websocket wss://<app-origin>'
+        return '\n'.join(lines)
     for item in result['source']['files']:
         if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item.get('sha256') in (
             'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
@@ -150,7 +153,9 @@ def main():
         if not a.out: raise ValueError('Link requires --out')
         record=load(kit/'kit.json')
         if record['toolchain'] != toolchain(): raise ValueError('Apple toolchain differs; use normal Exact build')
-        if runtime_grants(record['facts']) != runtime_grants(current): raise ValueError('Native inputs differ; use normal Exact build')
+        base,now=runtime_grants(record['facts']),runtime_grants(current)
+        differences=[k for k in sorted(base.keys()|now.keys()) if base.get(k)!=now.get(k)]
+        if differences: raise ValueError('Native inputs differ: '+', '.join(differences))
         if any(digest(kit/n)!=h for n,h in record['digests'].items()): raise ValueError('Kit digest mismatch')
         out=Path(a.out).resolve()
         if out.exists(): raise ValueError('Output already exists')
