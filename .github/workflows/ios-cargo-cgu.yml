@@ -1,4 +1,4 @@
-name: iOS Rust app profile experiment
+name: iOS Rust fresh runner comparison
 on:
   push:
     branches: [ios-cargo-cgu-v1]
@@ -8,37 +8,54 @@ env:
   EXACT_TOOLS_ORIGIN: none
 jobs:
   compare:
+    strategy:
+      fail-fast: false
+      matrix: {variant: [baseline, cgu16]}
     runs-on: blacksmith-6vcpu-macos-27
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
         with: {persist-credentials: false}
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: disposabl-dev/exact-cold-trail-coach
+          ref: b081d589b2e23f1b16281f32a52fc260e55fea92
+          path: fixture-trail
+          persist-credentials: false
       - uses: ./.github/actions/exact-setup
         with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '9'}
-      - name: Compare production native app compiles
+      - name: Build distinct Trail Coach production archive
         shell: bash
+        env: {VARIANT: '${{ matrix.variant }}'}
         run: |
           set -euo pipefail
-          export IOS_REAL_CARGO="$(command -v cargo)"
-          mkdir -p "$RUNNER_TEMP/cargowrap"
-          cp .github/ios-cgu-wrapper.sh "$RUNNER_TEMP/cargowrap/cargo"
-          chmod +x "$RUNNER_TEMP/cargowrap/cargo"
-          export PATH="$RUNNER_TEMP/cargowrap:$PATH"
+          cp -R "$GITHUB_WORKSPACE/fixture-trail/apps/apps/." "$NATIVE_APP_DIR/"
           cd "$NATIVE_APP_DIR"
-          for variant in baseline cgu16; do
-            export EXACT_UPDATE_TRUST=production EXACT_UPDATE_GENESIS=1 EXACT_BUILD_NUMBER=1 EXACT_VERSION=0.1.0 EXACT_MOBILE_CHANNEL=base-1
-            export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/bake-$variant" CONVEX_ORIGIN="wss://$variant-rust-fixture.invalid"
-            export EXACT_UPDATE_SEED="$(openssl rand -base64 32)"
-            python3 - "$variant" <<'PY'
+          bun install --frozen-lockfile
+          export EXACT_UPDATE_TRUST=production EXACT_UPDATE_GENESIS=1 EXACT_BUILD_NUMBER=1 EXACT_VERSION=0.1.0 EXACT_MOBILE_CHANNEL=base-1
+          export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/bake" CONVEX_ORIGIN="wss://$VARIANT-rust-fixture.invalid"
+          export EXACT_UPDATE_SEED="$(openssl rand -base64 32)"
+          python3 - "$VARIANT" <<'PY'
           import json,sys
-          p='app.json'; x=json.load(open(p)); x['id']='dev.example.ioscgu'+sys.argv[1]; x['app']['id']=x['id']; open(p,'w').write(json.dumps(x,indent=2)+'\n')
+          p='app.json'; x=json.load(open(p)); x['id']='dev.example.iosfresh'+sys.argv[1]; x['app']['id']=x['id']; open(p,'w').write(json.dumps(x,indent=2)+'\n')
           PY
-            bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure ios
-            unset EXACT_UPDATE_SEED
-            if [[ $variant == cgu16 ]]; then export IOS_TEST_CGU=16; else unset IOS_TEST_CGU; fi
-            start=$(date +%s)
-            bun exact.mjs ios --device --release --unsigned --archive "$RUNNER_TEMP/$variant.ipa" --json > "$RUNNER_TEMP/$variant.json"
-            echo "$variant elapsed $(( $(date +%s) - start )) seconds"
-            jq -e --arg id "dev.example.ioscgu$variant" '.trust=="production" and .compat.inputs.platform=="ios" and .compat.inputs.app==$id' "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" >/dev/null
-            unzip -tq "$RUNNER_TEMP/$variant.ipa" >/dev/null
-          done
+          bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure ios
+          unset EXACT_UPDATE_SEED
+          if [[ $VARIANT == cgu16 ]]; then
+            export EXACT_IOS_REAL_CARGO="$(command -v cargo)"
+            mkdir -p "$RUNNER_TEMP/cargowrap"
+            ln -s "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/ios-cargo-app-profile.sh" "$RUNNER_TEMP/cargowrap/cargo"
+            export PATH="$RUNNER_TEMP/cargowrap:$PATH"
+          fi
+          start=$(date +%s)
+          bun exact.mjs ios --device --release --unsigned --archive "$RUNNER_TEMP/result.ipa" --json > "$RUNNER_TEMP/result.json"
+          echo "$VARIANT elapsed $(( $(date +%s) - start )) seconds"
+          jq -e --arg id "dev.example.iosfresh$VARIANT" '.trust=="production" and .compat.inputs.platform=="ios" and .compat.inputs.app==$id' "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" >/dev/null
+          unzip -tq "$RUNNER_TEMP/result.ipa" >/dev/null
+          unzip -q "$RUNNER_TEMP/result.ipa" -d "$RUNNER_TEMP/verified"
+          apps=("$RUNNER_TEMP"/verified/Payload/*.app)
+          [[ ${#apps[@]} == 1 ]]
+          codesign --verify --deep --strict "${apps[0]}"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "${apps[0]}/Info.plist")
+          xcrun lipo -verify_arch arm64 "${apps[0]}/$executable"
+          jq -e --slurpfile bake "$EXACT_BAKE_OUTPUT/ios-aarch64-apple-ios.build.json" '.build == $bake[0] and .build.trust=="production"' "${apps[0]}/receipt.json" >/dev/null
