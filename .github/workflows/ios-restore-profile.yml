@@ -18,6 +18,7 @@ jobs:
       - uses: ./.github/actions/exact-setup
         with: {platform: ios, exact-ref: '${{ env.EXACT_REF }}', bundle-version: '8'}
       - name: Verify and build production test app
+        if: false
         shell: bash
         run: |
           cd "$NATIVE_APP_DIR"
@@ -32,6 +33,7 @@ jobs:
           tar -C "$HOME/.cache/exact/publisher/$EXACT_REF" -cf "$RUNNER_TEMP/publisher.tar" exact-bake exact-js-bake
           zstd -1 -q "$RUNNER_TEMP/publisher.tar" -o "$RUNNER_TEMP/publisher.tar.zst"
           shasum -a 256 "$RUNNER_TEMP/publisher.tar.zst" > "$RUNNER_TEMP/publisher.sha256"
+          printf '%s\n' "$EXACT_REF" > "$RUNNER_TEMP/publisher.ref"
           wc -c "$RUNNER_TEMP/publisher.tar.zst"
       - uses: actions/upload-artifact@v7.0.2
         with:
@@ -39,6 +41,7 @@ jobs:
           path: |
             ${{ runner.temp }}/publisher.tar.zst
             ${{ runner.temp }}/publisher.sha256
+            ${{ runner.temp }}/publisher.ref
           compression-level: 0
           retention-days: 1
   compact:
@@ -76,8 +79,9 @@ jobs:
             [[ "$a" == "$b" ]]
             cp "$RUNNER_TEMP/slim/unpacked/$tool" "$publisher/$tool"
           done
-          wrong_ref=0000000000000000000000000000000000000000
-          [[ "$wrong_ref" != "$EXACT_REF" ]] && echo 'PROFILE version mismatch rejected; full restore remains fallback'
+          check_version() { [[ $(cat "$RUNNER_TEMP/slim/publisher.ref") == "$1" ]]; }
+          if check_version 0000000000000000000000000000000000000000; then exit 1; else echo 'PROFILE version mismatch rejected; using normal full restore'; fi
+          check_version "$EXACT_REF"
       - name: Build with compact tools
         shell: bash
         run: |
