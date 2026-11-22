@@ -32,7 +32,7 @@ jobs:
       - name: Build actual source graph with public test identity
         shell: bash
         run: |
-          rsync -a --exclude=.exact --exclude=node_modules --exclude=target "$GITHUB_WORKSPACE/sample/apps/apps/" "$NATIVE_APP_DIR/"
+          rsync -a --delete --exclude=.exact --exclude=node_modules --exclude=target "$GITHUB_WORKSPACE/sample/apps/apps/" "$NATIVE_APP_DIR/"
           cd "$NATIVE_APP_DIR"
           bun install --frozen-lockfile
           unset EXACT_LINK_KIT_PROOF EXACT_LINK_KIT
