@@ -7,6 +7,7 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 
 gradle.projectsEvaluated {
+    System.err.println('CATALOG HOOK invoked properties=' + gradle.startParameter.projectProperties)
     def allow = (System.getenv('EXACT_ANDROID_CATALOG_PACKAGES') ?: '').split(',').findAll { it ==~ /[a-z0-9]+(?:-[a-z0-9]+)*/ }.toSet()
     if (!allow || System.getenv('EXACT_ANDROID_CATALOG_DISABLE') == '1') return
     def sdk = new File(System.getenv('EXACT')).canonicalFile
@@ -19,6 +20,7 @@ gradle.projectsEvaluated {
     def params = gradle.startParameter.projectProperties
     def dirs = (params.extensionDirs ?: '').split(',').findAll { it }.collect { new File(it).canonicalFile }
     def candidates = allow.findAll { name -> dirs.contains(new File(sdk, 'packages/' + name + '/android').canonicalFile) }.sort()
+    System.err.println('CATALOG candidates=' + candidates + ' dirs=' + dirs + ' sdk=' + sdk)
     if (!candidates) return
     try {
         def run = { List args ->
@@ -53,13 +55,13 @@ gradle.projectsEvaluated {
                 removed.add(original)
                 added.add(app.dependencies.add('implementation', app.files(new File(work, name + '.jar'))))
             }
-            println('Exact Android catalog selected: ' + (selected ?: 'none; sources retained'))
+            System.err.println('Exact Android catalog selected: ' + (selected ?: 'none; sources retained'))
         } catch (Exception error) {
             removed.each { kotlinDirs.add(it) }
             added.each { app.configurations.getByName('implementation').dependencies.remove(it) }
             throw error
         }
     } catch (Exception error) {
-        println('Exact Android catalog unavailable; using original Kotlin sources (' + error.class.simpleName + ')')
+        System.err.println('Exact Android catalog unavailable; using original Kotlin sources (' + error.class.simpleName + ')')
     }
 }
