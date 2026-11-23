@@ -1,0 +1,100 @@
+name: Verify candidate web tools archive
+on:
+  push:
+    branches: [benchmark-exact-bundle-20261123]
+permissions:
+  contents: read
+env:
+  EXACT_REF: b2faef1f203915b864aed27e201d32c6fe66d6e4
+  BUN_VERSION: 1.4.5
+  EXACT_TOOLS_ORIGIN: none
+jobs:
+  build:
+    runs-on: blacksmith-8vcpu-ubuntu-2604
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: expo/exact
+          ref: ${{ env.EXACT_REF }}
+          path: .exact-sdk
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Build web and signed-update tools
+        run: |
+          exact="$HOME/work/_temp/exact-sdk"
+          mkdir -p "$(dirname "$exact")"
+          test ! -e "$exact"
+          mv "$GITHUB_WORKSPACE/.exact-sdk" "$exact"
+          cd "$exact"
+          test "$(git rev-parse HEAD)" = "$EXACT_REF"
+          export CHROME="$(command -v google-chrome)"
+          cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml
+          bun scripts/exact.mjs setup --platform web
+          export PATH="$(bun -p 'import { BINARYEN } from "./host/web/stages.mjs"; `${process.env.HOME}/.cache/exact/binaryen/${BINARYEN.replace(" ", "_")}/bin`'):$PATH"
+          bun scripts/tools.mjs keep
+          CARGO_TARGET_DIR="$RUNNER_TEMP/publish-tools" cargo build --locked --release -p exact-bake -p exact-js-bake
+          publisher=".cache/exact/publisher/$EXACT_REF"
+          mkdir -p "$HOME/$publisher" "$RUNNER_TEMP/tools"
+          cp "$RUNNER_TEMP/publish-tools"/release/{exact-bake,exact-js-bake} "$HOME/$publisher/"
+          tar -C "$HOME" -cf - .cache/exact/tools "$publisher" .cargo/hermes-lean-sys |
+            zstd -T0 -1 -o "$RUNNER_TEMP/tools/exact-$EXACT_REF-web-Linux-X64-bun-$BUN_VERSION.tar.zst"
+          cd "$RUNNER_TEMP/tools"
+          sha256sum *.tar.zst | tee *.sha256 >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: candidate-web-tools
+          path: ${{ runner.temp }}/tools/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+  consume:
+    needs: build
+    runs-on: blacksmith-8vcpu-ubuntu-2604
+    timeout-minutes: 45
+    env:
+      CONVEX_ORIGIN: wss://example.invalid
+      CONVEX_SITE_ORIGIN: https://example.invalid
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: disposabl-dev/disposabl-exact
+          ref: 0e2a508352d5ac3d2cc83046a0b662966aea5e52
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: expo/exact
+          ref: ${{ env.EXACT_REF }}
+          path: .exact-sdk
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: candidate-web-tools
+          path: ${{ runner.temp }}/tools
+      - name: Verify and restore archive
+        run: |
+          exact="$HOME/work/_temp/exact-sdk"
+          mkdir -p "$(dirname "$exact")"
+          test ! -e "$exact"
+          mv "$GITHUB_WORKSPACE/.exact-sdk" "$exact"
+          test "$(git -C "$exact" rev-parse HEAD)" = "$EXACT_REF"
+          cd "$RUNNER_TEMP/tools"
+          sha256sum -c *.sha256
+          zstd -dc *.tar.zst | tar -xf - -C "$HOME"
+          echo "EXACT=$exact" >> "$GITHUB_ENV"
+          echo "EXACT_PUBLISH_TOOLS=$HOME/.cache/exact/publisher/$EXACT_REF" >> "$GITHUB_ENV"
+          cd "$exact"
+          bun install --frozen-lockfile
+      - name: Install app and build web
+        working-directory: apps/apps
+        run: |
+          mkdir -p .exact
+          ln -s "$EXACT" .exact/checkout
+          bun install --frozen-lockfile
+          bun exact.mjs web-build --out dist/convex
+          test -s dist/convex/index.html
