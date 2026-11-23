@@ -1,0 +1,61 @@
+name: Build candidate native tools archives
+on:
+  push:
+    branches: [benchmark-exact-native-20261123]
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [android, ios]
+    runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-6vcpu-macos-27' || 'blacksmith-8vcpu-ubuntu-2604' }}
+    timeout-minutes: 90
+    env:
+      SETUP_EXACT_REF: b2faef1f203915b864aed27e201d32c6fe66d6e4
+      SETUP_BUN_VERSION: 1.4.5
+      SETUP_PLATFORM: ${{ matrix.platform }}
+      EXACT_TOOLS_ORIGIN: none
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: disposabl-dev/disposabl-exact
+          ref: 0e2a508352d5ac3d2cc83046a0b662966aea5e52
+          path: app
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: expo/exact
+          ref: ${{ env.SETUP_EXACT_REF }}
+          path: .exact-sdk
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.SETUP_BUN_VERSION }}
+      - name: Prepare and pack native tools
+        shell: bash
+        run: |
+          exact="$RUNNER_TEMP/exact-sdk"
+          if [[ "$RUNNER_OS" == Linux ]]; then exact="$HOME/work/_temp/exact-sdk"; fi
+          mkdir -p "$(dirname "$exact")"
+          test ! -e "$exact"
+          mv "$GITHUB_WORKSPACE/.exact-sdk" "$exact"
+          test "$(git -C "$exact" rev-parse HEAD)" = "$SETUP_EXACT_REF"
+          export EXACT="$exact"
+          if [[ "$SETUP_PLATFORM" == ios && -d /Applications/Xcode_27.2.app/Contents/Developer ]]; then export DEVELOPER_DIR=/Applications/Xcode_27.2.app/Contents/Developer; fi
+          bash app/.github/actions/exact-setup/scripts/setup.sh
+          bash app/.github/actions/exact-setup/scripts/pack.sh
+          cd "$RUNNER_TEMP"
+          asset="exact-$SETUP_EXACT_REF-$SETUP_PLATFORM-$RUNNER_OS-$RUNNER_ARCH-bun-$SETUP_BUN_VERSION.tar.zst"
+          shasum -a 256 -c "$asset.sha256" | tee -a "$GITHUB_STEP_SUMMARY"
+          cat "$asset.sha256" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: candidate-${{ matrix.platform }}-tools
+          path: |
+            ${{ runner.temp }}/*.tar.zst
+            ${{ runner.temp }}/*.tar.zst.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
