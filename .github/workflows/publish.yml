@@ -1,0 +1,87 @@
+name: Build isolated v11 candidate native caches
+on:
+  push:
+    branches: [benchmark-exact-v11-20261123]
+permissions:
+  contents: read
+  actions: read
+env:
+  EXACT_REF: b2faef1f203915b864aed27e201d32c6fe66d6e4
+  BUN_VERSION: 1.4.5
+  BUNDLE_VERSION: '11'
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [web, android, ios]
+    runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-6vcpu-macos-27' || 'blacksmith-8vcpu-ubuntu-2604' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: disposabl-dev/disposabl-exact
+          ref: a7b428d
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: android-actions/setup-android@v4.0.4
+        if: matrix.platform == 'android'
+        with:
+          packages: platforms;android-37.2 build-tools;37.0.0 ndk;27.3.13750724
+      - uses: ./.github/actions/exact-setup
+        if: matrix.platform != 'web'
+        with:
+          mode: build
+          bundle-version: '11'
+          platform: ${{ matrix.platform }}
+          exact-ref: ${{ env.EXACT_REF }}
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Retrieve verified web bundle
+        if: matrix.platform == 'web'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/web-bundle"
+          for i in {1..40}; do
+            if gh run download 45131687606 --repo disposabl-dev/exact-cold-tool-lab --name candidate-web-tools --dir "$RUNNER_TEMP/web-bundle"; then break; fi
+            if [[ "$i" == 40 ]]; then exit 1; fi
+            sleep 20
+          done
+          cd "$RUNNER_TEMP/web-bundle"
+          sha256sum -c *.sha256
+          cp ./* "$RUNNER_TEMP/"
+      - uses: actions/checkout@v7.0.1
+        if: matrix.platform == 'web'
+        with:
+          repository: expo/exact
+          ref: ${{ env.EXACT_REF }}
+          path: .exact-sdk
+          persist-credentials: false
+      - name: Prepare web SDK checkout
+        if: matrix.platform == 'web'
+        run: |
+          exact="$HOME/work/_temp/exact-sdk"
+          mkdir -p "$(dirname "$exact")"
+          test ! -e "$exact"
+          mv "$GITHUB_WORKSPACE/.exact-sdk" "$exact"
+          test "$(git -C "$exact" rev-parse HEAD)" = "$EXACT_REF"
+          echo "EXACT=$exact" >> "$GITHUB_ENV"
+      - name: Prepare public build inputs
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          EXACT_TOOLS_ORIGIN: none
+          EXACT_UPDATE_TRUST: production
+          EXACT_UPDATE_GENESIS: '1'
+          CARGO_PROFILE_RELEASE_LTO: 'off'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+          CARGO_PROFILE_BALANCED_LTO: 'off'
+          CARGO_PROFILE_SIZE_LTO: 'off'
+        run: GITHUB_REPOSITORY=disposabl-dev/disposabl-exact bash .github/actions/exact-setup/scripts/publish-inputs.sh
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: v11-${{ matrix.platform }}
+          path: ${{ runner.temp }}/kit-out/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
