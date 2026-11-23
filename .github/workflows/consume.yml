@@ -1,0 +1,93 @@
+name: Verify isolated v11 native cache consumers
+on:
+  push:
+    branches: [benchmark-exact-v11-consumer-20261123]
+permissions:
+  contents: read
+  actions: read
+env:
+  EXACT_REF: b2faef1f203915b864aed27e201d32c6fe66d6e4
+  EXACT_TOOLS_ORIGIN: none
+  CONVEX_ORIGIN: wss://public-fixture.invalid
+  EXACT_MOBILE_CHANNEL: base-1
+  EXACT_UPDATE_TRUST: production
+  EXACT_UPDATE_GENESIS: '1'
+  EXACT_BUILD_NUMBER: '1'
+jobs:
+  consume:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [android]
+    runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-6vcpu-macos-27' || 'blacksmith-8vcpu-ubuntu-2604' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: disposabl-dev/disposabl-exact
+          ref: 163c92d803570b872dbd6710f5b10e51329802fa
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Retrieve and verify lab inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/lab-inputs"
+          gh run download 45132267463 --repo disposabl-dev/exact-cold-tool-lab --name v11-web --dir "$RUNNER_TEMP/lab-inputs"
+          gh run download 45132267463 --repo disposabl-dev/exact-cold-tool-lab --name "v11-$PLATFORM" --dir "$RUNNER_TEMP/lab-inputs"
+          cd "$RUNNER_TEMP/lab-inputs"
+          for file in *.sha256; do shasum -a 256 -c "$file"; done
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          files={}
+          for checksum in pathlib.Path('.').glob('*.sha256'):
+              f=checksum.with_suffix('')
+              files[f.name]={'size':f.stat().st_size,'sha256':checksum.read_text().split()[0]}
+          pathlib.Path('inputs.json').write_text(json.dumps(files))
+          PY
+          python3 - "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/restore.sh" <<'PY'
+          import pathlib,sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          s=s.replace('release="https://github.com/disposabl-dev/disposabl-exact/releases/download/$tag"','release="file://$RUNNER_TEMP/lab-inputs"')
+          old='  python3 "$scripts/release-manifest.py" \\\n    "$SETUP_BUNDLE_VERSION" "$ref" "$SETUP_BUN_VERSION" "$manifest"'
+          assert old in s
+          s=s.replace(old,'  cp "$RUNNER_TEMP/lab-inputs/inputs.json" "$manifest"')
+          p.write_text(s)
+          PY
+      - uses: ./.github/actions/exact-setup
+        with:
+          mode: consume
+          bundle-version: '11'
+          platform: ${{ matrix.platform }}
+          exact-ref: ${{ env.EXACT_REF }}
+          bun-version: 1.4.5
+      - name: Build public fixture and inspect cache use
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -o pipefail
+          cd "$NATIVE_APP_DIR"
+          export EXACT_BAKE_OUTPUT="$RUNNER_TEMP/$PLATFORM-artifacts/bake"
+          mkdir -p "$EXACT_BAKE_OUTPUT"
+          if [[ "$PLATFORM" == android ]]; then
+            export EXACT_KEYSTORE="$RUNNER_TEMP/fixture.p12" EXACT_KEY_ALIAS=android
+            export EXACT_KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
+            export EXACT_KEY_PASSWORD="$EXACT_KEYSTORE_PASSWORD"
+            keytool -genkeypair -noprompt -storetype PKCS12 -keystore "$EXACT_KEYSTORE" -storepass:env EXACT_KEYSTORE_PASSWORD -keypass:env EXACT_KEY_PASSWORD -alias android -keyalg RSA -dname CN=PublicFixture -validity 2 >/dev/null 2>&1
+            export EXACT_UPDATE_SEED="$(openssl rand -base64 32)"
+            bun "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/mobile-updates.mjs" configure android
+            unset EXACT_UPDATE_SEED
+            export EXACT_VERSION=$(bun -p 'JSON.parse(await Bun.file("app.json").text()).version')
+            bun exact.mjs android --release --no-install --json > "$RUNNER_TEMP/android-result.json" 2> >(tee "$RUNNER_TEMP/build.log" >&2)
+            apk=$(jq -er '.path' "$RUNNER_TEMP/android-result.json")
+            unzip -tq "$apk"
+            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify "$apk"
+          else
+            bun -e 'const p="app.json",a=await Bun.file(p).json();a.id="dev.disposabl.publicseed";a.app.id=a.id;a.deploy.store.ios="A";a.deploy.signing={key:"mobile",keys:{mobile:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}};a.deploy.channel="base-1";a.deploy.channels={"base-1":"appdrop"};await Bun.write(p,JSON.stringify(a,null,2)+"\n")'
+            bash "$GITHUB_WORKSPACE/.github/actions/exact-setup/scripts/native-build.sh" ios 2>&1 | tee "$RUNNER_TEMP/build.log"
+          fi
+          echo 'Cache evidence:'
+          rg -i 'from.cache|reus|fresh|compiling|dirty|swift' "$RUNNER_TEMP/build.log" | tail -100 || true
