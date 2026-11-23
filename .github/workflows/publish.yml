@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: disposabl-dev/disposabl-exact
-          ref: a7b428d
+          ref: a7b428df9bd346ea298cbbedbaaeb38a1dac1306
           fetch-depth: 0
           persist-credentials: false
       - uses: android-actions/setup-android@v4.0.4
