@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [android]
+        platform: [ios]
     runs-on: ${{ matrix.platform == 'ios' && 'blacksmith-6vcpu-macos-27' || 'blacksmith-8vcpu-ubuntu-2604' }}
     timeout-minutes: 120
     steps:
