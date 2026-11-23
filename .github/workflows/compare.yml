@@ -1,0 +1,61 @@
+name: Isolated Exact web comparison
+on:
+  push:
+    branches: [benchmark-exact-compare-20261123]
+permissions:
+  contents: read
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        exact: [a55c5581c7e1a62cdee1f09367ea2909c74c7292, b2faef1f203915b864aed27e201d32c6fe66d6e4]
+    runs-on: blacksmith-8vcpu-ubuntu-2604
+    timeout-minutes: 45
+    env:
+      EXACT_TOOLS_ORIGIN: none
+      CONVEX_ORIGIN: wss://example.invalid
+      CONVEX_SITE_ORIGIN: https://example.invalid
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: disposabl-dev/disposabl-exact
+          ref: 0e2a508352d5ac3d2cc83046a0b662966aea5e52
+          path: app
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.5
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: expo/exact
+          ref: ${{ matrix.exact }}
+          path: exact
+          persist-credentials: false
+      - name: Cold setup
+        shell: bash
+        run: |
+          export EXACT="$GITHUB_WORKSPACE/exact" SETUP_PLATFORM=web SETUP_EXACT_REF=${{ matrix.exact }}
+          /usr/bin/time -p bash app/.github/actions/exact-setup/scripts/setup.sh
+      - name: Warm setup
+        shell: bash
+        run: |
+          export EXACT="$GITHUB_WORKSPACE/exact" SETUP_PLATFORM=web SETUP_EXACT_REF=${{ matrix.exact }}
+          /usr/bin/time -p bash app/.github/actions/exact-setup/scripts/setup.sh
+      - name: Install app dependencies
+        shell: bash
+        working-directory: app/apps/apps
+        run: |
+          mkdir -p .exact
+          ln -s "$GITHUB_WORKSPACE/exact" .exact/checkout
+          /usr/bin/time -p bun install --frozen-lockfile
+      - name: Cold web build
+        working-directory: app/apps/apps
+        run: /usr/bin/time -p bun exact.mjs web-build --out dist/convex
+        env:
+          EXACT: ${{ github.workspace }}/exact
+      - name: Warm web build
+        working-directory: app/apps/apps
+        run: /usr/bin/time -p bun exact.mjs web-build --out dist/convex
+        env:
+          EXACT: ${{ github.workspace }}/exact
