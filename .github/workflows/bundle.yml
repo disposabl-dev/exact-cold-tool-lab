@@ -42,7 +42,8 @@ jobs:
           tar -C "$HOME" -cf - .cache/exact/tools "$publisher" .cargo/hermes-lean-sys |
             zstd -T0 -1 -o "$RUNNER_TEMP/tools/exact-$EXACT_REF-web-Linux-X64-bun-$BUN_VERSION.tar.zst"
           cd "$RUNNER_TEMP/tools"
-          sha256sum *.tar.zst | tee *.sha256 >> "$GITHUB_STEP_SUMMARY"
+          asset="exact-$EXACT_REF-web-Linux-X64-bun-$BUN_VERSION.tar.zst"
+          sha256sum "$asset" | tee "$asset.sha256" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: candidate-web-tools
